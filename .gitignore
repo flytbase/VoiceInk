@@ -98,3 +98,34 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk 
+
+build
+
+DerivedData
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.#*
+#*#
+*.swp
+*.swo
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# Documentation temp files
+*_COMPLETE.md
+*_TEMP.md
+*_BACKUP.md
+
+# Xcode project files that should not be committed
+# (contain user-specific settings like development team, bundle ID, etc.)
+VoiceInk.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+
+# User-specific Info.plist changes
+# (uncomment if Info.plist contains user-specific changes)
+# VoiceInk/Info.plist
