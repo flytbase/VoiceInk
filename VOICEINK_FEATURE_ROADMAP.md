@@ -165,13 +165,13 @@ enum TranscriptionProgress {
 
 ---
 
-### **Feature 4: Developer Mode & Error Logs**
-**Category**: User Experience  
+### **Feature 4: Comprehensive Error Handling & Logging System**
+**Category**: User Experience & Developer Tools  
 **Priority**: High  
-**Complexity**: Low  
+**Complexity**: Medium  
 
 #### **Description**
-Advanced debugging interface for developers and power users to view detailed error logs, API responses, and system diagnostics.
+Unified error handling and logging system that enhances both user experience and developer capabilities. Combines intelligent error management with comprehensive logging infrastructure to provide better user feedback and powerful debugging tools.
 
 #### **User Value**
 - **Developers**: Debug integration issues quickly
@@ -857,3 +857,16 @@ VoiceInk currently competes in the **AI transcription space** with tools like:
 ---
 
 *This roadmap is a living document that should be updated quarterly based on user feedback, market changes, and technical developments.*
+
+
+
+
+
+issues found post transcriptioncard breakdown
+
+1. in card collapsed state, action buttons got removed.
+2. in card collapsed state, the two icons showing transcript and enhance count do not represent correct ui state. it should have both icon and count just like when it is in expanded state.
+3. card selected state - border color visibility got removed.
+4. in expanded state, the chip vresion, enhaceversion row got removed and replaced by a warning icon.
+5. in expanded state, show more/less button got removed.
+6. clicking on retranscribe button did not trasition to loading state, intead shows wierd warning icon.
