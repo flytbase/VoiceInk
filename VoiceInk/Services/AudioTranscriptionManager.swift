@@ -36,7 +36,12 @@ class AudioTranscriptionManager: ObservableObject {
             case .processingAudio:
                 return "Processing audio file for transcription..."
             case .transcribing:
-                return "Transcribing audio..."
+                let geminiTranscription = GeminiAudioTranscription.shared
+                if geminiTranscription.isEnabled && geminiTranscription.isConfigured {
+                    return "Transcribing audio with Gemini 2.5 Pro..."
+                } else {
+                    return "Transcribing audio with Whisper..."
+                }
             case .enhancing:
                 return "Enhancing transcription with AI..."
             case .completed:
@@ -58,6 +63,80 @@ class AudioTranscriptionManager: ObservableObject {
         
         currentTask = Task {
             do {
+                // Check if Gemini transcription is enabled and configured
+                let geminiTranscription = GeminiAudioTranscription.shared
+                if geminiTranscription.isEnabled && geminiTranscription.isConfigured {
+                    // Use Gemini instead of Whisper
+                    processingPhase = .transcribing
+                    let selectedLanguage = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto"
+                    var text = try await geminiTranscription.transcribe(audioURL: url, language: selectedLanguage)
+                    
+                    // Get audio duration
+                    let audioAsset = AVURLAsset(url: url)
+                    let duration = CMTimeGetSeconds(try await audioAsset.load(.duration))
+                    
+                    // Create permanent copy of the audio file
+                    let recordingsDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                        .appendingPathComponent("com.prakashjoshipax.VoiceInk")
+                        .appendingPathComponent("Recordings")
+                    
+                    let fileName = "transcribed_\(UUID().uuidString).wav"
+                    let permanentURL = recordingsDirectory.appendingPathComponent(fileName)
+                    
+                    try FileManager.default.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true)
+                    try FileManager.default.copyItem(at: url, to: permanentURL)
+                    
+                    // Apply word replacements if enabled
+                    if UserDefaults.standard.bool(forKey: "IsWordReplacementEnabled") {
+                        text = WordReplacementService.shared.applyReplacements(to: text)
+                    }
+                    
+                    // Handle enhancement if enabled
+                    if let enhancementService = whisperState.enhancementService,
+                       enhancementService.isEnhancementEnabled,
+                       enhancementService.isConfigured {
+                        processingPhase = .enhancing
+                        do {
+                            let enhancedText = try await enhancementService.enhance(text)
+                            let transcription = Transcription(
+                                text: text,
+                                duration: duration,
+                                enhancedText: enhancedText,
+                                audioFileURL: permanentURL.absoluteString
+                            )
+                            modelContext.insert(transcription)
+                            try modelContext.save()
+                            currentTranscription = transcription
+                        } catch {
+                            logger.error("Enhancement failed: \(error.localizedDescription)")
+                            messageLog += "Enhancement failed: \(error.localizedDescription). Using original transcription.\n"
+                            let transcription = Transcription(
+                                text: text,
+                                duration: duration,
+                                audioFileURL: permanentURL.absoluteString
+                            )
+                            modelContext.insert(transcription)
+                            try modelContext.save()
+                            currentTranscription = transcription
+                        }
+                    } else {
+                        let transcription = Transcription(
+                            text: text,
+                            duration: duration,
+                            audioFileURL: permanentURL.absoluteString
+                        )
+                        modelContext.insert(transcription)
+                        try modelContext.save()
+                        currentTranscription = transcription
+                    }
+                    
+                    processingPhase = .completed
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    await finishProcessing()
+                    return
+                }
+                
+                // Continue with Whisper transcription
                 guard let currentModel = whisperState.currentModel else {
                     throw TranscriptionError.noModelSelected
                 }
@@ -185,4 +264,4 @@ enum TranscriptionError: Error, LocalizedError {
             return "Transcription was cancelled"
         }
     }
-} 
+}

@@ -41,7 +41,7 @@ enum AIProvider: String, CaseIterable {
         case .deepSeek:
             return "deepseek-chat"
         case .gemini:
-            return "gemini-2.0-flash"
+            return "gemini-2.5-pro-preview-05-06"
         case .anthropic:
             return "claude-3-5-sonnet-20241022"
         case .mistral:
@@ -72,6 +72,7 @@ enum AIProvider: String, CaseIterable {
             ]
         case .gemini:
             return [
+                "gemini-2.5-pro-preview-05-06",
                 "gemini-2.5-flash-preview-04-17",
                 "gemini-2.0-flash",
                 "gemini-2.0-flash-lite"
@@ -327,43 +328,109 @@ class AIService: ObservableObject {
     }
     
     private func verifyGeminiAPIKey(_ key: String, completion: @escaping (Bool) -> Void) {
+        logger.notice("🔍 Starting Gemini API key verification")
+        logger.notice("🔑 API key length: \(key.count) characters")
+        logger.notice("🔑 API key prefix: \(String(key.prefix(10)))...")
+        
         let baseEndpoint = "https://generativelanguage.googleapis.com/v1beta/models"
         let model = currentModel
         let fullURL = "\(baseEndpoint)/\(model):generateContent"
+        
+        logger.notice("🌐 Base endpoint: \(baseEndpoint)")
+        logger.notice("🤖 Model being used: \(model)")
+        logger.notice("🔗 Full URL before query params: \(fullURL)")
         
         var urlComponents = URLComponents(string: fullURL)!
         urlComponents.queryItems = [URLQueryItem(name: "key", value: key)]
         
         guard let url = urlComponents.url else {
+            logger.error("❌ Failed to construct URL from components")
             completion(false)
             return
         }
         
+        logger.notice("🔗 Final URL: \(url.absoluteString.replacingOccurrences(of: key, with: "\(String(key.prefix(10)))..."))")
+        
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
         
         let testBody: [String: Any] = [
             "contents": [
                 [
                     "parts": [
-                        ["text": "test"]
+                        ["text": "Hello, this is a test message for API verification."]
                     ]
                 ]
             ]
         ]
         
-        request.httpBody = try? JSONSerialization.data(withJSONObject: testBody)
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: testBody)
+            logger.notice("📤 Request body created successfully")
+            if let bodyString = String(data: request.httpBody!, encoding: .utf8) {
+                logger.notice("📄 Request body: \(bodyString)")
+            }
+        } catch {
+            logger.error("❌ Failed to serialize request body: \(error.localizedDescription)")
+            completion(false)
+            return
+        }
         
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        logger.notice("📤 Sending verification request...")
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
             if let error = error {
+                self.logger.error("❌ Network error: \(error.localizedDescription)")
+                self.logger.error("❌ Error details: \(error)")
                 completion(false)
                 return
             }
             
-            if let httpResponse = response as? HTTPURLResponse {
-                completion(httpResponse.statusCode == 200)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                self.logger.error("❌ No HTTP response received")
+                completion(false)
+                return
+            }
+            
+            self.logger.notice("📥 Response status code: \(httpResponse.statusCode)")
+            self.logger.notice("📋 Response headers: \(httpResponse.allHeaderFields)")
+            
+            if let data = data {
+                self.logger.notice("📄 Response data size: \(data.count) bytes")
+                if let responseString = String(data: data, encoding: .utf8) {
+                    self.logger.notice("📄 Response body: \(responseString)")
+                } else {
+                    self.logger.notice("📄 Response body: [Unable to decode as UTF-8]")
+                }
             } else {
+                self.logger.notice("📄 No response data received")
+            }
+            
+            switch httpResponse.statusCode {
+            case 200:
+                self.logger.notice("✅ Gemini API key verification successful (200)")
+                completion(true)
+            case 400:
+                self.logger.error("❌ Bad request (400) - Check request format")
+                completion(false)
+            case 401:
+                self.logger.error("❌ Unauthorized (401) - Invalid API key")
+                completion(false)
+            case 403:
+                self.logger.error("❌ Forbidden (403) - API key lacks permissions")
+                completion(false)
+            case 404:
+                self.logger.error("❌ Not found (404) - Check model name or endpoint")
+                completion(false)
+            case 429:
+                self.logger.error("❌ Rate limited (429) - Too many requests")
+                completion(false)
+            default:
+                self.logger.error("❌ Unexpected status code: \(httpResponse.statusCode)")
                 completion(false)
             }
         }.resume()
@@ -418,4 +485,4 @@ class AIService: ObservableObject {
 
 extension Notification.Name {
     static let aiProviderKeyChanged = Notification.Name("aiProviderKeyChanged")
-} 
+}
