@@ -119,8 +119,10 @@ struct WaveformView: View {
             ZStack(alignment: .leading) {
                 if isLoading {
                     VStack {
-                        ProgressView()
-                            .controlSize(.small)
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .medium))
+                            .rotationEffect(.degrees(360))
+                            .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: true)
                         Text("Generating waveform...")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
@@ -235,16 +237,6 @@ struct AudioPlayerView: View {
     let url: URL
     @StateObject private var playerManager = AudioPlayerManager()
     @State private var isHovering = false
-    @State private var isRetranscribing = false
-    @State private var showRetranscribeSuccess = false
-    @State private var showRetranscribeError = false
-    @State private var errorMessage = ""
-    @EnvironmentObject private var whisperState: WhisperState
-    @Environment(\.modelContext) private var modelContext
-    
-    private var transcriptionService: AudioTranscriptionService {
-        AudioTranscriptionService(modelContext: modelContext, whisperState: whisperState)
-    }
     
     var body: some View {
         VStack(spacing: 16) {
@@ -300,30 +292,7 @@ struct AudioPlayerView: View {
                         }
                     }
                     
-                    Button(action: retranscribeAudio) {
-                        Circle()
-                            .fill(Color.green.opacity(0.1))
-                            .frame(width: 44, height: 44)
-                            .overlay(
-                                Group {
-                                    if isRetranscribing {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    } else if showRetranscribeSuccess {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 18, weight: .semibold))
-                                            .foregroundStyle(Color.green)
-                                    } else {
-                                        Image(systemName: "arrow.clockwise")
-                                            .font(.system(size: 18, weight: .semibold))
-                                            .foregroundStyle(Color.green)
-                                    }
-                                }
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isRetranscribing)
-                    .help("Retranscribe this audio")
+                    Spacer()
                     
                     Text(formatTime(playerManager.currentTime))
                         .font(.system(size: 14, weight: .medium))
@@ -337,48 +306,6 @@ struct AudioPlayerView: View {
         .onAppear {
             playerManager.loadAudio(from: url)
         }
-        .overlay(
-            VStack {
-                if showRetranscribeSuccess {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("Retranscription successful")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.green.opacity(0.1))
-                            .stroke(Color.green.opacity(0.2), lineWidth: 1)
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                
-                if showRetranscribeError {
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundColor(.red)
-                        Text(errorMessage.isEmpty ? "Retranscription failed" : errorMessage)
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.red.opacity(0.1))
-                            .stroke(Color.red.opacity(0.2), lineWidth: 1)
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                
-                Spacer()
-            }
-            .padding(.top, 16)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showRetranscribeSuccess)
-            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: showRetranscribeError)
-        )
     }
     
     private func formatTime(_ time: TimeInterval) -> String {
@@ -386,39 +313,4 @@ struct AudioPlayerView: View {
         let seconds = Int(time) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-    
-    private func retranscribeAudio() {
-        guard let currentModel = whisperState.currentModel else {
-            errorMessage = "No transcription model selected"
-            showRetranscribeError = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                withAnimation { showRetranscribeError = false }
-            }
-            return
-        }
-        
-        isRetranscribing = true
-        
-        Task {
-            do {
-                let _ = try await transcriptionService.retranscribeAudio(from: url, using: currentModel)
-                await MainActor.run {
-                    isRetranscribing = false
-                    showRetranscribeSuccess = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        withAnimation { showRetranscribeSuccess = false }
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    isRetranscribing = false
-                    errorMessage = error.localizedDescription
-                    showRetranscribeError = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        withAnimation { showRetranscribeError = false }
-                    }
-                }
-            }
-        }
-    }
-} 
+}

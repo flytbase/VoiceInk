@@ -147,7 +147,7 @@ class AIService: ObservableObject {
     
     @Published private var selectedModels: [AIProvider: String] = [:]
     private let userDefaults = UserDefaults.standard
-    private let ollamaService = OllamaService()
+    private let ollamaService = OllamaService();
     
     var connectedProviders: [AIProvider] {
         AIProvider.allCases.filter { provider in

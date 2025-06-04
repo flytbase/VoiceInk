@@ -1,13 +1,13 @@
-import SwiftUI
-import SwiftData
 import KeyboardShortcuts
+import SwiftData
+import SwiftUI
 
 // ViewType enum with all cases
 enum ViewType: String, CaseIterable {
     case metrics = "Dashboard"
     case record = "Record Audio"
     case transcribeAudio = "Transcribe Audio"
-    case history = "History"
+    case enhancedHistory = "History"
     case models = "AI Models"
     case enhancement = "Enhancement"
     case powerMode = "Power Mode"
@@ -16,13 +16,14 @@ enum ViewType: String, CaseIterable {
     case dictionary = "Dictionary"
     case settings = "Settings"
     case license = "VoiceInk Pro"
-    
+
     var icon: String {
         switch self {
         case .metrics: return "gauge.medium"
         case .record: return "mic.circle.fill"
         case .transcribeAudio: return "waveform.circle.fill"
-        case .history: return "doc.text.fill"
+
+        case .enhancedHistory: return "doc.text.fill"
         case .models: return "brain.head.profile"
         case .enhancement: return "wand.and.stars"
         case .powerMode: return "sparkles.square.fill.on.square"
@@ -38,7 +39,7 @@ enum ViewType: String, CaseIterable {
 struct VisualEffectView: NSViewRepresentable {
     let material: NSVisualEffectView.Material
     let blendingMode: NSVisualEffectView.BlendingMode
-    
+
     func makeNSView(context: Context) -> NSVisualEffectView {
         let visualEffectView = NSVisualEffectView()
         visualEffectView.material = material
@@ -46,7 +47,7 @@ struct VisualEffectView: NSViewRepresentable {
         visualEffectView.state = .active
         return visualEffectView
     }
-    
+
     func updateNSView(_ visualEffectView: NSVisualEffectView, context: Context) {
         visualEffectView.material = material
         visualEffectView.blendingMode = blendingMode
@@ -71,10 +72,10 @@ struct DynamicSidebar: View {
                         .frame(width: 28, height: 28)
                         .cornerRadius(8)
                 }
-                
+
                 Text("VoiceInk")
                     .font(.system(size: 14, weight: .semibold))
-                
+
                 if case .licensed = licenseViewModel.licenseState {
                     Text("PRO")
                         .font(.system(size: 9, weight: .heavy))
@@ -84,12 +85,12 @@ struct DynamicSidebar: View {
                         .background(Color.blue)
                         .cornerRadius(4)
                 }
-                
+
                 Spacer()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            
+
             // Navigation Items
             ForEach(ViewType.allCases, id: \.self) { viewType in
                 DynamicSidebarButton(
@@ -105,7 +106,7 @@ struct DynamicSidebar: View {
                     hoveredView = isHovered ? viewType : nil
                 }
             }
-            
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -119,7 +120,7 @@ struct DynamicSidebarButton: View {
     let isHovered: Bool
     let namespace: Namespace.ID
     let action: () -> Void
-    
+
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -128,7 +129,7 @@ struct DynamicSidebarButton: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 18, weight: .medium))
                     .frame(width: 24, height: 24)
-                
+
                 Text(title)
                     .font(.system(size: 14, weight: .medium))
                     .lineLimit(1)
@@ -146,7 +147,9 @@ struct DynamicSidebarButton: View {
                             .shadow(color: Color.accentColor.opacity(0.5), radius: 5, x: 0, y: 2)
                     } else if isHovered {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(colorScheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
+                            .fill(
+                                colorScheme == .dark
+                                    ? Color.white.opacity(0.1) : Color.black.opacity(0.05))
                     }
                 }
             )
@@ -166,13 +169,11 @@ struct ContentView: View {
     @State private var hasLoadedData = false
     let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     @StateObject private var licenseViewModel = LicenseViewModel()
-    
+
     private var isSetupComplete: Bool {
-        hasLoadedData &&
-        whisperState.currentModel != nil &&
-        KeyboardShortcuts.getShortcut(for: .toggleMiniRecorder) != nil &&
-        AXIsProcessTrusted() &&
-        CGPreflightScreenCaptureAccess()
+        hasLoadedData && whisperState.currentModel != nil
+            && KeyboardShortcuts.getShortcut(for: .toggleMiniRecorder) != nil
+            && AXIsProcessTrusted() && CGPreflightScreenCaptureAccess()
     }
 
     var body: some View {
@@ -191,11 +192,12 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 1100, minHeight: 750)
-       .background(Color(.controlBackgroundColor))
+        .background(Color(.controlBackgroundColor))
         .onAppear {
             hasLoadedData = true
         }
-        .onReceive(NotificationCenter.default.publisher(for: .navigateToDestination)) { notification in
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToDestination)) {
+            notification in
             print("ContentView: Received navigation notification")
             if let destination = notification.userInfo?["destination"] as? String {
                 print("ContentView: Destination received: \(destination)")
@@ -209,9 +211,7 @@ struct ContentView: View {
                 case "VoiceInk Pro":
                     print("ContentView: Navigating to VoiceInk Pro")
                     selectedView = .license
-                case "History":
-                    print("ContentView: Navigating to History")
-                    selectedView = .history
+
                 case "Permissions":
                     print("ContentView: Navigating to Permissions")
                     selectedView = .permissions
@@ -227,7 +227,7 @@ struct ContentView: View {
             }
         }
     }
-    
+
     @ViewBuilder
     private var detailView: some View {
         switch selectedView {
@@ -245,8 +245,9 @@ struct ContentView: View {
             RecordView()
         case .transcribeAudio:
             AudioTranscribeView()
-        case .history:
-            TranscriptionHistoryView()
+
+        case .enhancedHistory:
+            TranscriptionHistoryViewV2()
         case .audioInput:
             AudioInputSettingsView()
         case .dictionary:

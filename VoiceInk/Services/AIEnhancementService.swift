@@ -59,7 +59,7 @@ class AIEnhancementService: ObservableObject {
     private let aiService: AIService
     private let screenCaptureService: ScreenCaptureService
     private let maxRetries = 3
-    private let baseTimeout: TimeInterval = 10
+    private let baseTimeout: TimeInterval = 500
     private let rateLimitInterval: TimeInterval = 1.0
     private var lastRequestTime: Date?
     private let modelContext: ModelContext
@@ -406,6 +406,8 @@ class AIEnhancementService: ObservableObject {
                 logger.notice("✅ AI enhancement completed successfully (\(result.count) characters)")
                 return result
             } catch let error as EnhancementError {
+                logger.error("🔴 API Error received: \(error.localizedDescription, privacy: .public) (attempt \(retryCount + 1))")
+                
                 if shouldRetry(error: error, retryCount: retryCount) {
                     let errorType = switch error {
                     case .rateLimitExceeded: "Rate limit exceeded"
@@ -414,17 +416,18 @@ class AIEnhancementService: ObservableObject {
                     default: "Unknown error"
                     }
                     
-                    logger.notice("⚠️ \(errorType), retrying AI enhancement (attempt \(retryCount + 1) of \(self.maxRetries))")
+                    logger.notice("🔄 RETRY TRIGGERED: \(errorType), retrying AI enhancement (attempt \(retryCount + 1) of \(self.maxRetries))")
                     retryCount += 1
                     let delaySeconds = getRetryDelay(for: retryCount)
+                    logger.notice("⏱️ Waiting \(delaySeconds) seconds before retry...")
                     try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
                     continue
                 } else {
-                    logger.notice("❌ AI enhancement failed: \(error.localizedDescription)")
+                    logger.error("❌ AI enhancement failed (no retry): \(error.localizedDescription, privacy: .public)")
                     throw error
                 }
             } catch {
-                logger.notice("❌ AI enhancement failed: \(error.localizedDescription)")
+                logger.error("❌ AI enhancement failed (unexpected error): \(error.localizedDescription, privacy: .public)")
                 throw error
             }
         }
@@ -519,6 +522,4 @@ enum EnhancementError: Error {
     case apiError
     case networkError
     case maxRetriesExceeded
-} 
-
-
+}
