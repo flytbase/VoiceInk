@@ -38,7 +38,8 @@ struct TranscriptionCardV2: View {
                 self._viewModel = StateObject(wrappedValue: TranscriptionCardViewModel(
                     transcription: transcription,
                     modelContext: modelContext,
-                    enhancementService: enhancementService
+                    enhancementService: enhancementService,
+                    loggingService: LoggingService.shared
                 ))
             } catch {
                 // Fallback to a minimal ViewModel that handles the error gracefully

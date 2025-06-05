@@ -48,6 +48,7 @@ class TranscriptionCardViewModel: ObservableObject {
     private let modelContext: ModelContext
     private let enhancementService: AIEnhancementService
     private let audioStorage: AudioStorageService
+    private let loggingService: LoggingService
 
     // MARK: - Constants
 
@@ -64,12 +65,14 @@ class TranscriptionCardViewModel: ObservableObject {
         transcription: Transcription,
         modelContext: ModelContext,
         enhancementService: AIEnhancementService,
-        audioStorage: AudioStorageService = AudioStorageService.shared
+        audioStorage: AudioStorageService = AudioStorageService.shared,
+        loggingService: LoggingService = LoggingService.shared
     ) {
         self.transcription = transcription
         self.modelContext = modelContext
         self.enhancementService = enhancementService
         self.audioStorage = audioStorage
+        self.loggingService = loggingService
 
         setupDefaultSelections()
     }
@@ -87,7 +90,8 @@ class TranscriptionCardViewModel: ObservableObject {
         let viewModel = TranscriptionCardViewModel(
             transcription: transcription,
             modelContext: fallbackModelContext,
-            enhancementService: fallbackEnhancementService
+            enhancementService: fallbackEnhancementService,
+            loggingService: LoggingService.shared
         )
         
         // Set error state
@@ -245,35 +249,84 @@ class TranscriptionCardViewModel: ObservableObject {
     // MARK: - Processing Actions
 
     func performRetranscription() async {
-        print("🔄 [DEBUG] performRetranscription() called")
+        let startTime = Date()
+        let transcriptionId = transcription.id.uuidString
+        
+        // Log start of re-transcription
+        loggingService.info(
+            "Starting re-transcription process from TranscriptionCard",
+            category: .transcription,
+            context: [
+                "transcription_id": transcriptionId,
+                "original_text_length": "\(transcription.text.count)",
+                "duration": "\(transcription.duration)s",
+                "existing_versions": "\(transcription.transcriptionVersions.count)",
+                "source": "TranscriptionCard"
+            ]
+        )
         
         guard let audioURLString = transcription.audioFileURL,
             let audioURL = URL(string: audioURLString),
             FileManager.default.fileExists(atPath: audioURL.path)
         else {
-            print("🔄 [DEBUG] Audio file not found")
+            loggingService.error(
+                "Re-transcription failed: Audio file not found",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "audio_url": transcription.audioFileURL ?? "nil",
+                    "source": "TranscriptionCard"
+                ]
+            )
             showError("Audio file not found")
             return
         }
 
         await MainActor.run {
-            print("🔄 [DEBUG] Setting isRetranscribing = true")
+            loggingService.debug(
+                "Setting re-transcription processing state",
+                category: .transcription,
+                context: ["transcription_id": transcriptionId, "source": "TranscriptionCard"]
+            )
             processingState.isRetranscribing = true
         }
 
         defer {
             Task { @MainActor in
-                print("🔄 [DEBUG] defer: Setting isRetranscribing = false")
+                loggingService.debug(
+                    "Clearing re-transcription processing state",
+                    category: .transcription,
+                    context: ["transcription_id": transcriptionId, "source": "TranscriptionCard"]
+                )
                 processingState.isRetranscribing = false
             }
         }
 
         do {
+            loggingService.debug(
+                "Initializing WhisperState for re-transcription",
+                category: .transcription,
+                context: ["transcription_id": transcriptionId, "source": "TranscriptionCard"]
+            )
+            
             // Use the shared manager for re-transcription
             try await EnhancedTranscriptionManager.shared.retranscribeWithVersioning(
                 transcription: transcription,
                 modelContext: modelContext,
                 whisperState: WhisperState(modelContext: modelContext)
+            )
+
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.info(
+                "Re-transcription completed successfully from TranscriptionCard",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "new_versions_count": "\(transcription.transcriptionVersions.count)",
+                    "source": "TranscriptionCard"
+                ]
             )
 
             // Show success message
@@ -284,29 +337,98 @@ class TranscriptionCardViewModel: ObservableObject {
             processingState.showRetranscribeSuccess = false
 
         } catch {
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.error(
+                "Re-transcription failed from TranscriptionCard",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "error_domain": (error as NSError).domain,
+                    "error_code": "\((error as NSError).code)",
+                    "source": "TranscriptionCard"
+                ],
+                error: error
+            )
             showError("Re-transcription failed: \(error.localizedDescription)")
         }
     }
 
     func performEnhancement() async {
+        let startTime = Date()
+        let transcriptionId = transcription.id.uuidString
+        
+        // Log start of enhancement
+        loggingService.info(
+            "Starting AI enhancement process from TranscriptionCard",
+            category: .enhancement,
+            context: [
+                "transcription_id": transcriptionId,
+                "text_length": "\(transcription.text.count)",
+                "existing_enhancements": "\(transcription.enhancementVersions.count)",
+                "has_versions": "\(!transcription.transcriptionVersions.isEmpty)",
+                "source": "TranscriptionCard"
+            ]
+        )
+        
         guard enhancementService.isConfigured else {
+            loggingService.error(
+                "AI Enhancement not configured",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "source": "TranscriptionCard"
+                ]
+            )
             showError("AI Enhancement not configured. Please check settings.")
             return
         }
 
         guard enhancementService.isEnhancementEnabled else {
+            loggingService.error(
+                "AI Enhancement is disabled",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "source": "TranscriptionCard"
+                ]
+            )
             showError("AI Enhancement is disabled. Enable it in settings.")
             return
         }
 
         guard let activePrompt = enhancementService.activePrompt else {
+            loggingService.error(
+                "No enhancement prompt selected",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "source": "TranscriptionCard"
+                ]
+            )
             showError("No enhancement prompt selected. Please select one in settings.")
             return
         }
 
+        loggingService.debug(
+            "Setting enhancement processing state",
+            category: .enhancement,
+            context: [
+                "transcription_id": transcriptionId,
+                "enhancement_method": activePrompt.title,
+                "source": "TranscriptionCard"
+            ]
+        )
+
         processingState.isEnhancing = true
 
         defer {
+            loggingService.debug(
+                "Clearing enhancement processing state",
+                category: .enhancement,
+                context: ["transcription_id": transcriptionId, "source": "TranscriptionCard"]
+            )
             processingState.isEnhancing = false
         }
 
@@ -314,11 +436,41 @@ class TranscriptionCardViewModel: ObservableObject {
         let textToEnhance: String
         if let selectedVersion = selectedTranscriptionVersion {
             textToEnhance = selectedVersion.text
+            loggingService.debug(
+                "Using selected transcription version for enhancement",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "version_id": selectedVersion.id.uuidString,
+                    "text_length": "\(selectedVersion.text.count)",
+                    "source": "TranscriptionCard"
+                ]
+            )
         } else {
             textToEnhance = transcription.text
+            loggingService.debug(
+                "Using original transcription text for enhancement",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "text_length": "\(transcription.text.count)",
+                    "source": "TranscriptionCard"
+                ]
+            )
         }
 
         do {
+            loggingService.debug(
+                "Calling AI enhancement service",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "enhancement_method": activePrompt.title,
+                    "input_text_length": "\(textToEnhance.count)",
+                    "source": "TranscriptionCard"
+                ]
+            )
+            
             // Use the configured enhancement service
             let enhancedText = try await enhancementService.enhance(textToEnhance)
 
@@ -338,10 +490,42 @@ class TranscriptionCardViewModel: ObservableObject {
             // Save to model context
             try modelContext.save()
 
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.info(
+                "AI enhancement completed successfully from TranscriptionCard",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "enhancement_method": activePrompt.title,
+                    "input_text_length": "\(textToEnhance.count)",
+                    "output_text_length": "\(enhancedText.count)",
+                    "total_enhancements": "\(transcription.enhancementVersions.count)",
+                    "source": "TranscriptionCard"
+                ]
+            )
+
             // Show success feedback
             showCopyFeedback(message: "Enhancement completed")
 
         } catch {
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.error(
+                "AI enhancement failed from TranscriptionCard",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "enhancement_method": activePrompt.title,
+                    "input_text_length": "\(textToEnhance.count)",
+                    "error_domain": (error as NSError).domain,
+                    "error_code": "\((error as NSError).code)",
+                    "source": "TranscriptionCard"
+                ],
+                error: error
+            )
             showError("Enhancement failed: \(error.localizedDescription)")
         }
     }
