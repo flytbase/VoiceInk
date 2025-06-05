@@ -191,8 +191,7 @@ struct ContentView: View {
                 .navigationTitle("")
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 1100, minHeight: 750)
-        .background(Color(.controlBackgroundColor))
+        .frame(minWidth: 940, minHeight: 730)
         .onAppear {
             hasLoadedData = true
         }
