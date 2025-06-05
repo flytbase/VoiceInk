@@ -482,22 +482,15 @@ struct TranscriptionsList: View {
         ScrollView {
             LazyVStack(spacing: Constants.cardSpacing) {
                 ForEach(transcriptions) { transcription in
-                    TranscriptionCardView(
+                    OptimizedTranscriptionCard(
                         transcription: transcription,
                         isExpanded: viewModel.expandedTranscription == transcription,
                         isSelected: viewModel.selectedTranscriptions.contains(transcription),
                         modelContext: modelContext,
-                        enhancementService: viewModel.enhancementService,
+                        enhancementService: viewModel.enhancementService ?? AIEnhancementService(modelContext: modelContext),
                         onTap: { viewModel.toggleSelection(transcription) }
                     )
-                    .contextMenu {
-                        ContextMenuView(
-                            transcription: transcription,
-                            onAction: { action in
-                                handleContextMenuAction(action, for: transcription)
-                            }
-                        )
-                    }
+                    .animation(.easeInOut(duration: Constants.animationDuration), value: viewModel.expandedTranscription == transcription)
                     .clipped()
                 }
             }
@@ -505,82 +498,6 @@ struct TranscriptionsList: View {
         }
         .scrollContentBackground(.hidden)
         .background(Color.clear)
-    }
-    
-    private func handleContextMenuAction(_ action: ContextMenuAction, for transcription: Transcription) {
-        switch action {
-        case .retranscribe:
-            TranscriptionActionHandler.retranscribe(transcription, modelContext: modelContext)
-        case .enhance:
-            if let enhancementService = viewModel.enhancementService {
-                TranscriptionActionHandler.enhance(transcription, with: enhancementService, modelContext: modelContext)
-            }
-        case .download:
-            TranscriptionActionHandler.downloadAudio(transcription)
-        case .copy:
-            TranscriptionActionHandler.copyText(transcription)
-        case .delete:
-            viewModel.selectedTranscriptions = [transcription]
-            viewModel.showingDeleteAlert = true
-        case .showVersions:
-            // Handle version history display
-            break
-        }
-    }
-}
-
-// MARK: - Transcription Card View
-
-struct TranscriptionCardView: View {
-    let transcription: Transcription
-    let isExpanded: Bool
-    let isSelected: Bool
-    let modelContext: ModelContext
-    let enhancementService: AIEnhancementService?
-    let onTap: () -> Void
-    
-    var body: some View {
-        OptimizedTranscriptionCard(
-            transcription: transcription,
-            isExpanded: isExpanded,
-            isSelected: isSelected,
-            modelContext: modelContext,
-            enhancementService: enhancementService ?? AIEnhancementService(modelContext: modelContext),
-            onTap: onTap
-        )
-        .animation(.easeInOut(duration: Constants.animationDuration), value: isExpanded)
-    }
-}
-
-// MARK: - Context Menu
-
-enum ContextMenuAction {
-    case retranscribe, enhance, download, copy, delete, showVersions
-}
-
-struct ContextMenuView: View {
-    let transcription: Transcription
-    let onAction: (ContextMenuAction) -> Void
-    
-    var body: some View {
-        Group {
-            Button("Re-transcribe") { onAction(.retranscribe) }
-            Button("Enhance") { onAction(.enhance) }
-            
-            if transcription.audioFileURL != nil {
-                Button("Download") { onAction(.download) }
-            }
-            
-            Button("Copy") { onAction(.copy) }
-            
-            if transcription.hasMultipleVersions {
-                Button("Versions") { onAction(.showVersions) }
-            }
-            
-            Divider()
-            
-            Button("Delete", role: .destructive) { onAction(.delete) }
-        }
     }
 }
 
@@ -626,175 +543,6 @@ struct SelectionToolbarView: View {
     }
 }
 
-// MARK: - Action Handler
-
-enum TranscriptionActionHandler {
-    @MainActor
-    static func retranscribe(_ transcription: Transcription, modelContext: ModelContext) {
-        let loggingService = LoggingService.shared
-        let startTime = Date()
-        let transcriptionId = transcription.id.uuidString
-        
-        loggingService.info(
-            "Starting re-transcription process",
-            category: .transcription,
-            context: [
-                "transcription_id": transcriptionId,
-                "original_text_length": "\(transcription.text.count)",
-                "duration": "\(transcription.duration)s",
-                "existing_versions": "\(transcription.transcriptionVersions.count)"
-            ]
-        )
-        
-        Task {
-            do {
-                let whisperState = WhisperState(modelContext: modelContext)
-                try await EnhancedTranscriptionManager.shared.retranscribeWithVersioning(
-                    transcription: transcription,
-                    modelContext: modelContext,
-                    whisperState: whisperState
-                )
-                
-                let processingTime = Date().timeIntervalSince(startTime)
-                loggingService.info(
-                    "Re-transcription completed successfully",
-                    category: .transcription,
-                    context: [
-                        "transcription_id": transcriptionId,
-                        "processing_time": String(format: "%.2f", processingTime),
-                        "new_versions_count": "\(transcription.transcriptionVersions.count)"
-                    ]
-                )
-            } catch {
-                let processingTime = Date().timeIntervalSince(startTime)
-                loggingService.error(
-                    "Re-transcription failed",
-                    category: .transcription,
-                    context: [
-                        "transcription_id": transcriptionId,
-                        "processing_time": String(format: "%.2f", processingTime)
-                    ],
-                    error: error
-                )
-            }
-        }
-    }
-    
-    @MainActor
-    static func enhance(_ transcription: Transcription, with enhancementService: AIEnhancementService, modelContext: ModelContext) {
-        let loggingService = LoggingService.shared
-        let startTime = Date()
-        let transcriptionId = transcription.id.uuidString
-        
-        loggingService.info(
-            "Starting AI enhancement process",
-            category: .enhancement,
-            context: [
-                "transcription_id": transcriptionId,
-                "text_length": "\(transcription.text.count)",
-                "existing_enhancements": "\(transcription.enhancementVersions.count)"
-            ]
-        )
-        
-        Task {
-            do {
-                let enhancementMethod = "grammar_correction"
-                let textToEnhance = transcription.mainVersion?.text ?? transcription.text
-                let enhancedText = try await enhancementService.enhance(textToEnhance)
-                
-                let baseVersionId = transcription.mainVersion?.id ?? transcription.id
-                let enhancementVersion = EnhancementVersion(
-                    enhancedText: enhancedText,
-                    enhancementMethod: enhancementMethod,
-                    baseVersionId: baseVersionId,
-                    enhancementPrompt: enhancementService.activePrompt?.title
-                )
-                
-                transcription.enhancementVersions.append(enhancementVersion)
-                try modelContext.save()
-                
-                let processingTime = Date().timeIntervalSince(startTime)
-                loggingService.info(
-                    "AI enhancement completed successfully",
-                    category: .enhancement,
-                    context: [
-                        "transcription_id": transcriptionId,
-                        "processing_time": String(format: "%.2f", processingTime),
-                        "enhancement_method": enhancementMethod
-                    ]
-                )
-            } catch {
-                let processingTime = Date().timeIntervalSince(startTime)
-                loggingService.error(
-                    "AI enhancement failed",
-                    category: .enhancement,
-                    context: [
-                        "transcription_id": transcriptionId,
-                        "processing_time": String(format: "%.2f", processingTime)
-                    ],
-                    error: error
-                )
-            }
-        }
-    }
-    
-    @MainActor
-    static func downloadAudio(_ transcription: Transcription) {
-        let loggingService = LoggingService.shared
-        let startTime = Date()
-        let transcriptionId = transcription.id.uuidString
-        
-        loggingService.info(
-            "Starting audio download",
-            category: .fileSystem,
-            context: [
-                "transcription_id": transcriptionId,
-                "has_audio_url": "\(transcription.audioFileURL != nil)"
-            ]
-        )
-        
-        Task {
-            do {
-                let downloadedURL = try await AudioStorageService.shared.downloadAudio(from: transcription)
-                let processingTime = Date().timeIntervalSince(startTime)
-                
-                loggingService.info(
-                    "Audio download completed successfully",
-                    category: .fileSystem,
-                    context: [
-                        "transcription_id": transcriptionId,
-                        "processing_time": String(format: "%.2f", processingTime),
-                        "downloaded_url": downloadedURL?.path ?? "unknown"
-                    ]
-                )
-            } catch {
-                let processingTime = Date().timeIntervalSince(startTime)
-                loggingService.error(
-                    "Audio download failed",
-                    category: .fileSystem,
-                    context: [
-                        "transcription_id": transcriptionId,
-                        "processing_time": String(format: "%.2f", processingTime)
-                    ],
-                    error: error
-                )
-            }
-        }
-    }
-    
-    @MainActor
-    static func copyText(_ transcription: Transcription) {
-        let text = transcription.mainVersion?.text ?? transcription.text
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        
-        LoggingService.shared.info(
-            "Text copied to clipboard",
-            category: .general,
-            context: ["text_length": "\(text.count)"]
-        )
-    }
-}
 
 // MARK: - Stat Badge Component
 
