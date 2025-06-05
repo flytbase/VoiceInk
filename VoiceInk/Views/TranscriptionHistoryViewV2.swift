@@ -482,21 +482,36 @@ struct TranscriptionsList: View {
         ScrollView {
             LazyVStack(spacing: Constants.cardSpacing) {
                 ForEach(transcriptions) { transcription in
-                    TranscriptionCardView(
-                        transcription: transcription,
-                        isExpanded: viewModel.expandedTranscription == transcription,
-                        isSelected: viewModel.selectedTranscriptions.contains(transcription),
-                        modelContext: modelContext,
-                        enhancementService: viewModel.enhancementService,
-                        onTap: { viewModel.toggleSelection(transcription) }
-                    )
-                    .contextMenu {
-                        ContextMenuView(
-                            transcription: transcription,
-                            onAction: { action in
-                                handleContextMenuAction(action, for: transcription)
+                    let isExpanded = viewModel.expandedTranscription == transcription
+                    
+                    Group {
+                        if isExpanded {
+                            TranscriptionCardView(
+                                transcription: transcription,
+                                isExpanded: isExpanded,
+                                isSelected: viewModel.selectedTranscriptions.contains(transcription),
+                                modelContext: modelContext,
+                                enhancementService: viewModel.enhancementService,
+                                onTap: { viewModel.toggleSelection(transcription) }
+                            )
+                            .contextMenu {
+                                ContextMenuView(
+                                    transcription: transcription,
+                                    onAction: { action in
+                                        handleContextMenuAction(action, for: transcription)
+                                    }
+                                )
                             }
-                        )
+                        } else {
+                            TranscriptionCardView(
+                                transcription: transcription,
+                                isExpanded: isExpanded,
+                                isSelected: viewModel.selectedTranscriptions.contains(transcription),
+                                modelContext: modelContext,
+                                enhancementService: viewModel.enhancementService,
+                                onTap: { viewModel.toggleSelection(transcription) }
+                            )
+                        }
                     }
                     .clipped()
                 }
