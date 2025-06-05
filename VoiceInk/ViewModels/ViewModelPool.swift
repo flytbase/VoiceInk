@@ -167,38 +167,6 @@ struct TranscriptionCardPreview: View {
                 }
 
                 Spacer()
-
-                // Actions dropdown
-                Menu {
-                    Button("Re-transcribe") {
-                        // TODO: Add retranscribe action
-                    }
-
-                    Button("Enhance") {
-                        // TODO: Add enhance action
-                    }
-
-                    if transcription.audioFileURL != nil {
-                        Button("Download") {
-                            // TODO: Add download action
-                        }
-                    }
-
-                    Divider()
-
-                    Button("Delete", role: .destructive) {
-                        // TODO: Add delete action
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Actions")
-                            .font(.caption)
-                        Image(systemName: "ellipsis")
-                            .font(.caption)
-                    }
-                    .foregroundColor(.blue)
-                }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 4)
         }
