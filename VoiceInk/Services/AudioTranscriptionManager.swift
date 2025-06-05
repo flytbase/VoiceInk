@@ -17,7 +17,7 @@ class AudioTranscriptionManager: ObservableObject {
     private var currentTask: Task<Void, Error>?
     private var whisperContext: WhisperContext?
     private let audioProcessor = AudioProcessor()
-    private let logger = Logger(subsystem: "com.prakashjoshipax.voiceink", category: "AudioTranscriptionManager")
+    private let loggingService: LoggingService
     
     enum ProcessingPhase {
         case idle
@@ -50,9 +50,27 @@ class AudioTranscriptionManager: ObservableObject {
         }
     }
     
-    private init() {}
+    private init(loggingService: LoggingService = LoggingService.shared) {
+        self.loggingService = loggingService
+    }
     
     func startProcessing(url: URL, modelContext: ModelContext, whisperState: WhisperState) {
+        let startTime = Date()
+        let sessionId = UUID().uuidString
+        let audioFileName = url.lastPathComponent
+        
+        // Log start of processing
+        loggingService.info(
+            "Starting audio transcription processing",
+            category: .transcription,
+            context: [
+                "session_id": sessionId,
+                "file_name": audioFileName,
+                "file_url": url.path,
+                "source": "AudioTranscriptionManager"
+            ]
+        )
+        
         // Cancel any existing processing
         cancelProcessing()
         
@@ -66,6 +84,16 @@ class AudioTranscriptionManager: ObservableObject {
                 // Check if Gemini transcription is enabled and configured
                 let geminiTranscription = GeminiAudioTranscription.shared
                 if geminiTranscription.isEnabled && geminiTranscription.isConfigured {
+                    loggingService.debug(
+                        "Using Gemini transcription path",
+                        category: .transcription,
+                        context: [
+                            "session_id": sessionId,
+                            "method": "Gemini",
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
+                    
                     // Use Gemini instead of Whisper
                     processingPhase = .transcribing
                     let selectedLanguage = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto"
@@ -74,6 +102,17 @@ class AudioTranscriptionManager: ObservableObject {
                     // Get audio duration
                     let audioAsset = AVURLAsset(url: url)
                     let duration = CMTimeGetSeconds(try await audioAsset.load(.duration))
+                    
+                    loggingService.debug(
+                        "Audio metadata extracted",
+                        category: .transcription,
+                        context: [
+                            "session_id": sessionId,
+                            "duration": "\(duration)s",
+                            "text_length": "\(text.count)",
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
                     
                     // Create permanent copy of the audio file
                     let recordingsDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -86,15 +125,47 @@ class AudioTranscriptionManager: ObservableObject {
                     try FileManager.default.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true)
                     try FileManager.default.copyItem(at: url, to: permanentURL)
                     
+                    loggingService.debug(
+                        "Audio file copied to permanent storage",
+                        category: .fileSystem,
+                        context: [
+                            "session_id": sessionId,
+                            "permanent_path": permanentURL.path,
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
+                    
                     // Apply word replacements if enabled
                     if UserDefaults.standard.bool(forKey: "IsWordReplacementEnabled") {
+                        let originalLength = text.count
                         text = WordReplacementService.shared.applyReplacements(to: text)
+                        loggingService.debug(
+                            "Word replacements applied",
+                            category: .transcription,
+                            context: [
+                                "session_id": sessionId,
+                                "original_length": "\(originalLength)",
+                                "new_length": "\(text.count)",
+                                "source": "AudioTranscriptionManager"
+                            ]
+                        )
                     }
                     
                     // Handle enhancement if enabled
                     if let enhancementService = whisperState.enhancementService,
                        enhancementService.isEnhancementEnabled,
                        enhancementService.isConfigured {
+                        
+                        loggingService.debug(
+                            "Starting AI enhancement",
+                            category: .enhancement,
+                            context: [
+                                "session_id": sessionId,
+                                "text_length": "\(text.count)",
+                                "source": "AudioTranscriptionManager"
+                            ]
+                        )
+                        
                         processingPhase = .enhancing
                         do {
                             let enhancedText = try await enhancementService.enhance(text)
@@ -107,8 +178,28 @@ class AudioTranscriptionManager: ObservableObject {
                             modelContext.insert(transcription)
                             try modelContext.save()
                             currentTranscription = transcription
+                            
+                            loggingService.info(
+                                "Transcription with enhancement completed successfully",
+                                category: .enhancement,
+                                context: [
+                                    "session_id": sessionId,
+                                    "transcription_id": transcription.id.uuidString,
+                                    "enhanced_text_length": "\(enhancedText.count)",
+                                    "source": "AudioTranscriptionManager"
+                                ]
+                            )
                         } catch {
-                            logger.error("Enhancement failed: \(error.localizedDescription)")
+                            loggingService.warning(
+                                "Enhancement failed, using original transcription",
+                                category: .enhancement,
+                                context: [
+                                    "session_id": sessionId,
+                                    "error_domain": (error as NSError).domain,
+                                    "error_code": "\((error as NSError).code)",
+                                    "source": "AudioTranscriptionManager"
+                                ]
+                            )
                             messageLog += "Enhancement failed: \(error.localizedDescription). Using original transcription.\n"
                             let transcription = Transcription(
                                 text: text,
@@ -128,18 +219,69 @@ class AudioTranscriptionManager: ObservableObject {
                         modelContext.insert(transcription)
                         try modelContext.save()
                         currentTranscription = transcription
+                        
+                        loggingService.info(
+                            "Transcription completed successfully (no enhancement)",
+                            category: .transcription,
+                            context: [
+                                "session_id": sessionId,
+                                "transcription_id": transcription.id.uuidString,
+                                "text_length": "\(text.count)",
+                                "source": "AudioTranscriptionManager"
+                            ]
+                        )
                     }
                     
                     processingPhase = .completed
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                     await finishProcessing()
+                    
+                    let totalProcessingTime = Date().timeIntervalSince(startTime)
+                    loggingService.info(
+                        "Gemini transcription session completed",
+                        category: .transcription,
+                        context: [
+                            "session_id": sessionId,
+                            "total_processing_time": String(format: "%.2f", totalProcessingTime),
+                            "method": "Gemini",
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
                     return
                 }
                 
                 // Continue with Whisper transcription
+                loggingService.debug(
+                    "Using Whisper transcription path",
+                    category: .transcription,
+                    context: [
+                        "session_id": sessionId,
+                        "method": "Whisper",
+                        "source": "AudioTranscriptionManager"
+                    ]
+                )
+                
                 guard let currentModel = whisperState.currentModel else {
+                    loggingService.error(
+                        "Whisper transcription failed: No model selected",
+                        category: .transcription,
+                        context: [
+                            "session_id": sessionId,
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
                     throw TranscriptionError.noModelSelected
                 }
+                
+                loggingService.debug(
+                    "Loading Whisper model",
+                    category: .transcription,
+                    context: [
+                        "session_id": sessionId,
+                        "model_path": currentModel.url.path,
+                        "source": "AudioTranscriptionManager"
+                    ]
+                )
                 
                 // Load Whisper model
                 whisperContext = try await WhisperContext.createContext(path: currentModel.url.path)
@@ -147,6 +289,16 @@ class AudioTranscriptionManager: ObservableObject {
                 // Process audio file
                 processingPhase = .processingAudio
                 let samples = try await audioProcessor.processAudioToSamples(url)
+                
+                loggingService.debug(
+                    "Audio processed to samples",
+                    category: .transcription,
+                    context: [
+                        "session_id": sessionId,
+                        "sample_count": "\(samples.count)",
+                        "source": "AudioTranscriptionManager"
+                    ]
+                )
                 
                 // Get audio duration
                 let audioAsset = AVURLAsset(url: url)
@@ -163,6 +315,16 @@ class AudioTranscriptionManager: ObservableObject {
                 try FileManager.default.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true)
                 try FileManager.default.copyItem(at: url, to: permanentURL)
                 
+                loggingService.debug(
+                    "Audio file copied to permanent storage",
+                    category: .fileSystem,
+                    context: [
+                        "session_id": sessionId,
+                        "permanent_path": permanentURL.path,
+                        "source": "AudioTranscriptionManager"
+                    ]
+                )
+                
                 // Transcribe
                 processingPhase = .transcribing
                 await whisperContext?.setPrompt(whisperState.whisperPrompt.transcriptionPrompt)
@@ -171,15 +333,48 @@ class AudioTranscriptionManager: ObservableObject {
                 text = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 text = WhisperTextFormatter.format(text)
                 
+                loggingService.debug(
+                    "Whisper transcription completed",
+                    category: .transcription,
+                    context: [
+                        "session_id": sessionId,
+                        "text_length": "\(text.count)",
+                        "duration": "\(duration)s",
+                        "source": "AudioTranscriptionManager"
+                    ]
+                )
+                
                 // Apply word replacements if enabled
                 if UserDefaults.standard.bool(forKey: "IsWordReplacementEnabled") {
+                    let originalLength = text.count
                     text = WordReplacementService.shared.applyReplacements(to: text)
+                    loggingService.debug(
+                        "Word replacements applied",
+                        category: .transcription,
+                        context: [
+                            "session_id": sessionId,
+                            "original_length": "\(originalLength)",
+                            "new_length": "\(text.count)",
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
                 }
                 
                 // Handle enhancement if enabled
                 if let enhancementService = whisperState.enhancementService,
                    enhancementService.isEnhancementEnabled,
                    enhancementService.isConfigured {
+                    
+                    loggingService.debug(
+                        "Starting AI enhancement",
+                        category: .enhancement,
+                        context: [
+                            "session_id": sessionId,
+                            "text_length": "\(text.count)",
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
+                    
                     processingPhase = .enhancing
                     do {
                         let enhancedText = try await enhancementService.enhance(text)
@@ -192,8 +387,28 @@ class AudioTranscriptionManager: ObservableObject {
                         modelContext.insert(transcription)
                         try modelContext.save()
                         currentTranscription = transcription
+                        
+                        loggingService.info(
+                            "Whisper transcription with enhancement completed successfully",
+                            category: .enhancement,
+                            context: [
+                                "session_id": sessionId,
+                                "transcription_id": transcription.id.uuidString,
+                                "enhanced_text_length": "\(enhancedText.count)",
+                                "source": "AudioTranscriptionManager"
+                            ]
+                        )
                     } catch {
-                        logger.error("Enhancement failed: \(error.localizedDescription)")
+                        loggingService.warning(
+                            "Enhancement failed, using original transcription",
+                            category: .enhancement,
+                            context: [
+                                "session_id": sessionId,
+                                "error_domain": (error as NSError).domain,
+                                "error_code": "\((error as NSError).code)",
+                                "source": "AudioTranscriptionManager"
+                            ]
+                        )
                         messageLog += "Enhancement failed: \(error.localizedDescription). Using original transcription.\n"
                         let transcription = Transcription(
                             text: text,
@@ -213,11 +428,34 @@ class AudioTranscriptionManager: ObservableObject {
                     modelContext.insert(transcription)
                     try modelContext.save()
                     currentTranscription = transcription
+                    
+                    loggingService.info(
+                        "Whisper transcription completed successfully (no enhancement)",
+                        category: .transcription,
+                        context: [
+                            "session_id": sessionId,
+                            "transcription_id": transcription.id.uuidString,
+                            "text_length": "\(text.count)",
+                            "source": "AudioTranscriptionManager"
+                        ]
+                    )
                 }
                 
                 processingPhase = .completed
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 await finishProcessing()
+                
+                let totalProcessingTime = Date().timeIntervalSince(startTime)
+                loggingService.info(
+                    "Whisper transcription session completed",
+                    category: .transcription,
+                    context: [
+                        "session_id": sessionId,
+                        "total_processing_time": String(format: "%.2f", totalProcessingTime),
+                        "method": "Whisper",
+                        "source": "AudioTranscriptionManager"
+                    ]
+                )
                 
             } catch {
                 await handleError(error)
@@ -238,7 +476,16 @@ class AudioTranscriptionManager: ObservableObject {
     }
     
     private func handleError(_ error: Error) {
-        logger.error("Transcription error: \(error.localizedDescription)")
+        loggingService.error(
+            "Transcription processing failed",
+            category: .transcription,
+            context: [
+                "error_domain": (error as NSError).domain,
+                "error_code": "\((error as NSError).code)",
+                "source": "AudioTranscriptionManager"
+            ],
+            error: error
+        )
         errorMessage = error.localizedDescription
         messageLog += "Error: \(error.localizedDescription)\n"
         isProcessing = false

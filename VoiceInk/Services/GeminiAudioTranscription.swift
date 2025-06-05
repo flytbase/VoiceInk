@@ -6,10 +6,12 @@ import UniformTypeIdentifiers
 class GeminiAudioTranscription {
     static let shared = GeminiAudioTranscription()
     
-    private let logger = Logger(subsystem: "com.prakashjoshipax.voiceink", category: "GeminiAudioTranscription")
+    private let loggingService: LoggingService
     private let baseURL = "https://generativelanguage.googleapis.com/v1beta/models"
     
-    private init() {}
+    private init(loggingService: LoggingService = LoggingService.shared) {
+        self.loggingService = loggingService
+    }
     
     // Check if Gemini transcription is enabled and configured
     var isEnabled: Bool {
@@ -28,7 +30,32 @@ class GeminiAudioTranscription {
     
     // Transcribe audio using Gemini 2.5 Pro
     func transcribe(audioURL: URL, language: String?) async throws -> String {
+        let startTime = Date()
+        let audioFileName = audioURL.lastPathComponent
+        let requestId = UUID().uuidString
+        
+        // Log start of transcription
+        loggingService.info(
+            "Starting Gemini audio transcription",
+            category: .transcription,
+            context: [
+                "request_id": requestId,
+                "file_name": audioFileName,
+                "language": language ?? "auto",
+                "source": "GeminiAudioTranscription"
+            ]
+        )
+        
         guard isConfigured else {
+            loggingService.error(
+                "Gemini transcription failed: API not configured",
+                category: .transcription,
+                context: [
+                    "request_id": requestId,
+                    "file_name": audioFileName,
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription", 
                 code: 1,
@@ -36,17 +63,36 @@ class GeminiAudioTranscription {
             )
         }
         
-        logger.notice("🔄 Starting Gemini audio transcription")
-        
         // Get AI service instance for API key and model
         let aiService = AIService()
         let apiKey = aiService.apiKey
         let model = aiService.currentModel
         
+        loggingService.debug(
+            "Gemini API configuration validated",
+            category: .transcription,
+            context: [
+                "request_id": requestId,
+                "model": model,
+                "source": "GeminiAudioTranscription"
+            ]
+        )
+        
         // Validate file size (20MB limit)
         let fileSize = try getFileSize(audioURL)
         let maxSize: Int64 = 20 * 1024 * 1024 // 20MB
         guard fileSize <= maxSize else {
+            loggingService.error(
+                "Gemini transcription failed: Audio file too large",
+                category: .transcription,
+                context: [
+                    "request_id": requestId,
+                    "file_name": audioFileName,
+                    "file_size": formatFileSize(fileSize),
+                    "max_size": "20MB",
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 2,
@@ -61,7 +107,17 @@ class GeminiAudioTranscription {
         // Determine MIME type
         let mimeType = getMimeType(for: audioURL)
         
-        logger.notice("📁 Audio file: \(self.formatFileSize(fileSize)), MIME: \(mimeType)")
+        loggingService.debug(
+            "Audio file processed for Gemini API",
+            category: .transcription,
+            context: [
+                "request_id": requestId,
+                "file_size": formatFileSize(fileSize),
+                "mime_type": mimeType,
+                "base64_length": "\(base64Audio.count)",
+                "source": "GeminiAudioTranscription"
+            ]
+        )
         
         // Get transcription prompt from service
         let transcriptionPrompt = getSelectedTranscriptionPrompt()
@@ -91,6 +147,16 @@ class GeminiAudioTranscription {
         urlComponents.queryItems = [URLQueryItem(name: "key", value: apiKey)]
         
         guard let url = urlComponents.url else {
+            loggingService.error(
+                "Gemini transcription failed: Invalid request URL",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "model": model,
+                    "base_url": baseURL,
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 3,
@@ -107,36 +173,82 @@ class GeminiAudioTranscription {
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         } catch {
+            loggingService.error(
+                "Gemini transcription failed: Request encoding error",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "error_domain": (error as NSError).domain,
+                    "error_code": "\((error as NSError).code)",
+                    "source": "GeminiAudioTranscription"
+                ],
+                error: error
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 4,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to encode request: \(error.localizedDescription)"]
             )
         }
-        
-        logger.notice("📤 Sending transcription request to Gemini...")
-        
+
+        loggingService.debug(
+            "Sending transcription request to Gemini API",
+            category: .network,
+            context: [
+                "request_id": requestId,
+                "url": fullURL,
+                "timeout": "60s",
+                "source": "GeminiAudioTranscription"
+            ]
+        )
+
         // Send request
         let (data, response) = try await URLSession.shared.data(for: request)
-        
+
         guard let httpResponse = response as? HTTPURLResponse else {
+            loggingService.error(
+                "Gemini transcription failed: Network error",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 5,
                 userInfo: [NSLocalizedDescriptionKey: "Network error"]
             )
         }
-        
-        logger.notice("📥 Response status: \(httpResponse.statusCode)")
+
+        loggingService.debug(
+            "Received Gemini API response",
+            category: .network,
+            context: [
+                "request_id": requestId,
+                "status_code": "\(httpResponse.statusCode)",
+                "response_size": "\(data.count) bytes",
+                "source": "GeminiAudioTranscription"
+            ]
+        )
         
         // Handle response
         switch httpResponse.statusCode {
         case 200:
-            return try parseTranscriptionResponse(data)
+            return try await parseTranscriptionResponse(data, requestId: requestId, audioFileName: audioFileName, startTime: startTime)
             
         case 400:
             let errorMessage = try parseErrorResponse(data) ?? "Bad request - check audio format and size"
-            logger.error("❌ Gemini API: Bad request - \(errorMessage)")
+            loggingService.error(
+                "Gemini API error: Bad request",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "status_code": "400",
+                    "error_message": errorMessage,
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 6,
@@ -144,7 +256,15 @@ class GeminiAudioTranscription {
             )
             
         case 401:
-            logger.error("❌ Gemini API: Unauthorized")
+            loggingService.error(
+                "Gemini API error: Unauthorized",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "status_code": "401",
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 7,
@@ -152,7 +272,15 @@ class GeminiAudioTranscription {
             )
             
         case 403:
-            logger.error("❌ Gemini API: Forbidden")
+            loggingService.error(
+                "Gemini API error: Forbidden",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "status_code": "403",
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 8,
@@ -160,7 +288,15 @@ class GeminiAudioTranscription {
             )
             
         case 429:
-            logger.error("❌ Gemini API: Rate limited")
+            loggingService.error(
+                "Gemini API error: Rate limited",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "status_code": "429",
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 9,
@@ -169,7 +305,16 @@ class GeminiAudioTranscription {
             
         default:
             let errorMessage = try parseErrorResponse(data) ?? "Unknown error"
-            logger.error("❌ Gemini API: Error \(httpResponse.statusCode) - \(errorMessage)")
+            loggingService.error(
+                "Gemini API error: Unknown status code",
+                category: .network,
+                context: [
+                    "request_id": requestId,
+                    "status_code": "\(httpResponse.statusCode)",
+                    "error_message": errorMessage,
+                    "source": "GeminiAudioTranscription"
+                ]
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 10,
@@ -216,7 +361,7 @@ class GeminiAudioTranscription {
         }
     }
     
-    private func parseTranscriptionResponse(_ data: Data) throws -> String {
+    private func parseTranscriptionResponse(_ data: Data, requestId: String, audioFileName: String, startTime: Date) async throws -> String {
         do {
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                let candidates = json["candidates"] as? [[String: Any]],
@@ -227,14 +372,47 @@ class GeminiAudioTranscription {
                let text = firstPart["text"] as? String {
                 
                 let cleanedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                logger.notice("✅ Gemini transcription completed: \(cleanedText.count) characters")
+                let processingTime = Date().timeIntervalSince(startTime)
+                
+                loggingService.info(
+                    "Gemini transcription completed successfully",
+                    category: .transcription,
+                    context: [
+                        "request_id": requestId,
+                        "file_name": audioFileName,
+                        "text_length": "\(cleanedText.count)",
+                        "processing_time": String(format: "%.2f", processingTime),
+                        "source": "GeminiAudioTranscription"
+                    ]
+                )
                 return cleanedText
             } else {
-                logger.warning("⚠️ Gemini returned empty or invalid response")
+                loggingService.warning(
+                    "Gemini returned empty or invalid response",
+                    category: .transcription,
+                    context: [
+                        "request_id": requestId,
+                        "file_name": audioFileName,
+                        "response_size": "\(data.count) bytes",
+                        "source": "GeminiAudioTranscription"
+                    ]
+                )
                 return ""
             }
         } catch {
-            logger.error("❌ Failed to parse Gemini response: \(error.localizedDescription)")
+            loggingService.error(
+                "Failed to parse Gemini response",
+                category: .transcription,
+                context: [
+                    "request_id": requestId,
+                    "file_name": audioFileName,
+                    "response_size": "\(data.count) bytes",
+                    "error_domain": (error as NSError).domain,
+                    "error_code": "\((error as NSError).code)",
+                    "source": "GeminiAudioTranscription"
+                ],
+                error: error
+            )
             throw NSError(
                 domain: "GeminiAudioTranscription",
                 code: 11,

@@ -1,8 +1,8 @@
 import Foundation
 import SwiftData
+import SwiftUI
 import os
 
-@MainActor
 class EnhancedTranscriptionManager: ObservableObject {
     static let shared = EnhancedTranscriptionManager()
     
@@ -11,9 +11,11 @@ class EnhancedTranscriptionManager: ObservableObject {
     @Published var processingMessage = ""
     @Published var errorMessage: String?
     
-    private let logger = Logger(subsystem: "com.prakashjoshipax.voiceink", category: "EnhancedTranscription")
+    private let loggingService: LoggingService
     
-    private init() {}
+    private init(loggingService: LoggingService = LoggingService.shared) {
+        self.loggingService = loggingService
+    }
     
     // MARK: - Re-transcription with Versioning
     
@@ -22,9 +24,34 @@ class EnhancedTranscriptionManager: ObservableObject {
         modelContext: ModelContext,
         whisperState: WhisperState
     ) async throws {
+        let startTime = Date()
+        let transcriptionId = transcription.id.uuidString
+        
+        // Log start of re-transcription
+        loggingService.info(
+            "Starting re-transcription with versioning",
+            category: .transcription,
+            context: [
+                "transcription_id": transcriptionId,
+                "original_text_length": "\(transcription.text.count)",
+                "duration": "\(transcription.duration)s",
+                "existing_versions": "\(transcription.transcriptionVersions.count)",
+                "source": "EnhancedTranscriptionManager"
+            ]
+        )
+        
         guard let audioURLString = transcription.audioFileURL,
               let audioURL = URL(string: audioURLString),
               FileManager.default.fileExists(atPath: audioURL.path) else {
+            loggingService.error(
+                "Re-transcription failed: Audio file not found",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "audio_url": transcription.audioFileURL ?? "nil",
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
             throw EnhancedTranscriptionError.audioFileNotFound
         }
         
@@ -42,12 +69,33 @@ class EnhancedTranscriptionManager: ObservableObject {
         do {
             // Determine current transcription method
             let transcriptionMethod = getCurrentTranscriptionMethod()
+            loggingService.debug(
+                "Selected transcription method",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "method": transcriptionMethod,
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
+            
             processingMessage = "Transcribing with \(transcriptionMethod)..."
             processingProgress = 0.3
             
             // Perform transcription
             let newText = try await performTranscription(audioURL: audioURL, whisperState: whisperState)
             processingProgress = 0.8
+            
+            loggingService.debug(
+                "Transcription completed, creating new version",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "new_text_length": "\(newText.count)",
+                    "method": transcriptionMethod,
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
             
             // Create new version
             let newVersion = TranscriptionVersion(
@@ -60,9 +108,20 @@ class EnhancedTranscriptionManager: ObservableObject {
             transcription.addTranscriptionVersion(newVersion)
             
             // Handle enhancement if enabled
-            if let enhancementService = whisperState.enhancementService,
+            if let enhancementService = await whisperState.enhancementService,
                enhancementService.isEnhancementEnabled,
                enhancementService.isConfigured {
+                
+                loggingService.debug(
+                    "Starting AI enhancement for new version",
+                    category: .enhancement,
+                    context: [
+                        "transcription_id": transcriptionId,
+                        "version_id": newVersion.id.uuidString,
+                        "text_length": "\(newText.count)",
+                        "source": "EnhancedTranscriptionManager"
+                    ]
+                )
                 
                 processingMessage = "Enhancing transcription..."
                 processingProgress = 0.9
@@ -75,8 +134,29 @@ class EnhancedTranscriptionManager: ObservableObject {
                         baseVersionId: newVersion.id
                     )
                     transcription.addEnhancementVersion(enhancementVersion)
+                    
+                    loggingService.info(
+                        "Enhancement completed successfully",
+                        category: .enhancement,
+                        context: [
+                            "transcription_id": transcriptionId,
+                            "version_id": newVersion.id.uuidString,
+                            "enhanced_text_length": "\(enhancedText.count)",
+                            "source": "EnhancedTranscriptionManager"
+                        ]
+                    )
                 } catch {
-                    logger.warning("Enhancement failed: \(error.localizedDescription)")
+                    loggingService.warning(
+                        "Enhancement failed, continuing without enhancement",
+                        category: .enhancement,
+                        context: [
+                            "transcription_id": transcriptionId,
+                            "version_id": newVersion.id.uuidString,
+                            "error_domain": (error as NSError).domain,
+                            "error_code": "\((error as NSError).code)",
+                            "source": "EnhancedTranscriptionManager"
+                        ]
+                    )
                     // Continue without enhancement
                 }
             }
@@ -85,13 +165,41 @@ class EnhancedTranscriptionManager: ObservableObject {
             processingProgress = 1.0
             processingMessage = "Re-transcription completed!"
             
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.info(
+                "Re-transcription with versioning completed successfully",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "method": transcriptionMethod,
+                    "new_versions_count": "\(transcription.transcriptionVersions.count)",
+                    "total_enhancements": "\(transcription.enhancementVersions.count)",
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
+            
             // Clear success message after delay
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 self.processingMessage = ""
             }
             
         } catch {
-            logger.error("Re-transcription failed: \(error.localizedDescription)")
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.error(
+                "Re-transcription with versioning failed",
+                category: .transcription,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "error_domain": (error as NSError).domain,
+                    "error_code": "\((error as NSError).code)",
+                    "source": "EnhancedTranscriptionManager"
+                ],
+                error: error
+            )
             errorMessage = error.localizedDescription
             throw error
         }
@@ -105,7 +213,29 @@ class EnhancedTranscriptionManager: ObservableObject {
         modelContext: ModelContext,
         enhancementService: AIEnhancementService
     ) async throws {
+        let startTime = Date()
+        let transcriptionId = transcription.id.uuidString
+        
+        loggingService.info(
+            "Starting historical transcription enhancement",
+            category: .enhancement,
+            context: [
+                "transcription_id": transcriptionId,
+                "version_id": versionId?.uuidString ?? "main",
+                "existing_enhancements": "\(transcription.enhancementVersions.count)",
+                "source": "EnhancedTranscriptionManager"
+            ]
+        )
+        
         guard enhancementService.isConfigured else {
+            loggingService.error(
+                "Enhancement failed: Service not configured",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
             throw EnhancedTranscriptionError.enhancementNotConfigured
         }
         
@@ -115,6 +245,16 @@ class EnhancedTranscriptionManager: ObservableObject {
             : transcription.mainVersion
         
         guard let version = targetVersion else {
+            loggingService.error(
+                "Enhancement failed: No version found",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "requested_version_id": versionId?.uuidString ?? "main",
+                    "available_versions": "\(transcription.transcriptionVersions.count)",
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
             throw EnhancedTranscriptionError.noVersionFound
         }
         
@@ -128,6 +268,17 @@ class EnhancedTranscriptionManager: ObservableObject {
         }
         
         do {
+            loggingService.debug(
+                "Starting enhancement process",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "version_id": version.id.uuidString,
+                    "text_length": "\(version.text.count)",
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
+            
             let enhancedText = try await enhancementService.enhance(version.text)
             
             let enhancementVersion = EnhancementVersion(
@@ -139,13 +290,42 @@ class EnhancedTranscriptionManager: ObservableObject {
             transcription.addEnhancementVersion(enhancementVersion)
             try modelContext.save()
             
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.info(
+                "Historical transcription enhancement completed successfully",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "version_id": version.id.uuidString,
+                    "enhanced_text_length": "\(enhancedText.count)",
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "total_enhancements": "\(transcription.enhancementVersions.count)",
+                    "source": "EnhancedTranscriptionManager"
+                ]
+            )
+            
             processingMessage = "Enhancement completed!"
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                 self.processingMessage = ""
             }
             
         } catch {
-            logger.error("Enhancement failed: \(error.localizedDescription)")
+            let processingTime = Date().timeIntervalSince(startTime)
+            
+            loggingService.error(
+                "Historical transcription enhancement failed",
+                category: .enhancement,
+                context: [
+                    "transcription_id": transcriptionId,
+                    "version_id": version.id.uuidString,
+                    "processing_time": String(format: "%.2f", processingTime),
+                    "error_domain": (error as NSError).domain,
+                    "error_code": "\((error as NSError).code)",
+                    "source": "EnhancedTranscriptionManager"
+                ],
+                error: error
+            )
             errorMessage = error.localizedDescription
             throw error
         }
@@ -188,7 +368,7 @@ class EnhancedTranscriptionManager: ObservableObject {
             return text
         } else {
             // Use Whisper transcription
-            guard let currentModel = whisperState.currentModel else {
+            guard let currentModel = await whisperState.currentModel else {
                 throw EnhancedTranscriptionError.noModelSelected
             }
             
@@ -197,7 +377,7 @@ class EnhancedTranscriptionManager: ObservableObject {
             let samples = try await audioProcessor.processAudioToSamples(audioURL)
             
             await whisperContext.setPrompt(whisperState.whisperPrompt.transcriptionPrompt)
-            try await whisperContext.fullTranscribe(samples: samples)
+            await whisperContext.fullTranscribe(samples: samples)
             var text = await whisperContext.getTranscription()
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             text = WhisperTextFormatter.format(text)
