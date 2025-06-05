@@ -191,6 +191,15 @@ struct SettingsView: View {
                     AudioCleanupSettingsView()
                 }
                 
+                // Developer Section
+                SettingsSection(
+                    icon: "hammer.circle",
+                    title: "Developer",
+                    subtitle: "Advanced debugging and logging"
+                ) {
+                    DeveloperSettingsView()
+                }
+                
                 // Reset Onboarding Section
                 SettingsSection(
                     icon: "arrow.counterclockwise",

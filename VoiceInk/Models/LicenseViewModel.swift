@@ -20,7 +20,7 @@ class LicenseViewModel: ObservableObject {
     private let userDefaults = UserDefaults.standard
     
     init() {
-        loadLicenseState()
+        // loadLicenseState()
     }
     
     func startTrial() {
