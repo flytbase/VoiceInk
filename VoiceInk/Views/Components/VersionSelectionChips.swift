@@ -39,7 +39,6 @@ struct VersionSelectionChips: View {
                                 label:
                                     "\(version.transcriptionMethod) • T\(versionNumber) • \(version.createdAt.formatted(date: .omitted, time: .shortened))",
                                 isSelected: selectedTranscriptionVersionId == version.id,
-                                isMain: version.isMainVersion,
                                 confidence: version.confidence,
                                 method: version.transcriptionMethod
                             ) {
@@ -61,7 +60,6 @@ struct VersionSelectionChips: View {
 struct VersionChip: View {
     let label: String
     let isSelected: Bool
-    let isMain: Bool
     let confidence: Double?
     let method: String
     let action: () -> Void
@@ -69,12 +67,6 @@ struct VersionChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                if isMain {
-                    Image(systemName: "star.fill")
-                        .font(.caption2)
-                        .foregroundColor(.yellow)
-                }
-
                 Text(label)
                     .font(.caption)
                     .fontWeight(.medium)

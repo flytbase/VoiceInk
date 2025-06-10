@@ -192,6 +192,15 @@ struct SettingsView: View {
                     AudioCleanupSettingsView()
                 }
                 
+                // Streaming Transcription Section
+                SettingsSection(
+                    icon: "waveform.badge.plus",
+                    title: "Streaming Transcription",
+                    subtitle: "Real-time transcription for large files"
+                ) {
+                    StreamingSettingsView()
+                }
+                
                 // Developer Section
                 SettingsSection(
                     icon: "hammer.circle",

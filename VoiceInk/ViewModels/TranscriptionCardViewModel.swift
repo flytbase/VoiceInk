@@ -3,6 +3,19 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+// MARK: - Extensions
+
+extension URL {
+    var fileSize: Int64? {
+        do {
+            let resourceValues = try resourceValues(forKeys: [.fileSizeKey])
+            return resourceValues.fileSize.map { Int64($0) }
+        } catch {
+            return nil
+        }
+    }
+}
+
 // MARK: - State Structures
 
 struct SelectionState {
@@ -282,26 +295,9 @@ class TranscriptionCardViewModel: ObservableObject {
             return
         }
 
-        await MainActor.run {
-            loggingService.debug(
-                "Setting re-transcription processing state",
-                category: .transcription,
-                context: ["transcription_id": transcriptionId, "source": "TranscriptionCard"]
-            )
-            processingState.isRetranscribing = true
-        }
-
-        defer {
-            Task { @MainActor in
-                loggingService.debug(
-                    "Clearing re-transcription processing state",
-                    category: .transcription,
-                    context: ["transcription_id": transcriptionId, "source": "TranscriptionCard"]
-                )
-                processingState.isRetranscribing = false
-            }
-        }
-
+        // Set processing state
+        processingState.isRetranscribing = true
+        
         do {
             loggingService.debug(
                 "Initializing WhisperState for re-transcription",
@@ -309,12 +305,47 @@ class TranscriptionCardViewModel: ObservableObject {
                 context: ["transcription_id": transcriptionId, "source": "TranscriptionCard"]
             )
             
-            // Use the shared manager for re-transcription
-            try await EnhancedTranscriptionManager.shared.retranscribeWithVersioning(
-                transcription: transcription,
-                modelContext: modelContext,
-                whisperState: WhisperState(modelContext: modelContext)
-            )
+            let whisperState = WhisperState(modelContext: modelContext)
+            
+            // Check if streaming mode should be used for re-transcription
+            if AudioTranscriptionManager.shared.shouldUseStreamingMode(for: audioURL) {
+                loggingService.info(
+                    "Using streaming mode for re-transcription",
+                    category: .transcription,
+                    context: [
+                        "transcription_id": transcriptionId,
+                        "file_size": "\(audioURL.fileSize ?? 0) bytes",
+                        "source": "TranscriptionCard"
+                    ]
+                )
+                
+                // Use streaming re-transcription with transcription ID for tracking
+                await AudioTranscriptionManager.shared.transcribeWithStreaming(
+                    audioURL: audioURL,
+                    modelContext: modelContext,
+                    whisperState: whisperState,
+                    isRetranscription: true,
+                    originalTranscription: transcription,
+                    transcriptionId: transcription.id
+                )
+            } else {
+                loggingService.info(
+                    "Using traditional mode for re-transcription",
+                    category: .transcription,
+                    context: [
+                        "transcription_id": transcriptionId,
+                        "file_size": "\(audioURL.fileSize ?? 0) bytes",
+                        "source": "TranscriptionCard"
+                    ]
+                )
+                
+                // Use traditional re-transcription
+                try await EnhancedTranscriptionManager.shared.retranscribeWithVersioning(
+                    transcription: transcription,
+                    modelContext: modelContext,
+                    whisperState: whisperState
+                )
+            }
 
             let processingTime = Date().timeIntervalSince(startTime)
             
@@ -328,6 +359,9 @@ class TranscriptionCardViewModel: ObservableObject {
                     "source": "TranscriptionCard"
                 ]
             )
+
+            // Clear processing state on success
+            processingState.isRetranscribing = false
 
             // Show success message
             processingState.showRetranscribeSuccess = true
@@ -351,6 +385,9 @@ class TranscriptionCardViewModel: ObservableObject {
                 ],
                 error: error
             )
+            
+            // Clear processing state on error
+            processingState.isRetranscribing = false
             showError("Re-transcription failed: \(error.localizedDescription)")
         }
     }

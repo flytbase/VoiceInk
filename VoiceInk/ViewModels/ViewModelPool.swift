@@ -222,9 +222,22 @@ struct OptimizedTranscriptionCard: View {
     let onTap: () -> Void
 
     @StateObject private var viewModelPool = ViewModelPool.shared
+    @StateObject private var audioManager = AudioTranscriptionManager.shared
     @State private var viewModel: TranscriptionCardViewModel?
 
     var body: some View {
+        ZStack {
+            // Main card content
+            cardContent
+            
+            // Progress overlay (only when this transcription is being re-transcribed)
+            if audioManager.activeRetranscriptions.contains(transcription.id) {
+                retranscriptionProgressOverlay
+            }
+        }
+    }
+    
+    private var cardContent: some View {
         Group {
             if isExpanded {
                 // Full card with ViewModel
@@ -271,6 +284,23 @@ struct OptimizedTranscriptionCard: View {
                 releaseViewModel()
             }
         }
+    }
+    
+    private var retranscriptionProgressOverlay: some View {
+        StreamingProgressView(
+            streamingState: audioManager.streamingState,
+            liveText: audioManager.liveTranscriptionText,
+            context: .reTranscription,
+            variant: isExpanded ? .full : .compact,
+            onCancel: {
+                audioManager.cancelStreamingProcessing()
+            }
+        )
+        .background(
+            RoundedRectangle(cornerRadius: isExpanded ? 12 : 8)
+                .fill(Color.black.opacity(0.3))
+        )
+        .animation(.easeInOut(duration: 0.3), value: audioManager.activeRetranscriptions.contains(transcription.id))
     }
 
     private func loadViewModel() {

@@ -3,6 +3,7 @@ import os
 import UniformTypeIdentifiers
 
 // Gemini Audio Transcription Service for VoiceInk
+@available(*, deprecated, message: "Use GeminiStreamingService instead. This legacy service will be removed in a future version.")
 class GeminiAudioTranscription {
     static let shared = GeminiAudioTranscription()
     
@@ -11,6 +12,12 @@ class GeminiAudioTranscription {
     
     private init(loggingService: LoggingService = LoggingService.shared) {
         self.loggingService = loggingService
+        
+        // Log deprecation warning
+        loggingService.warning(
+            "GeminiAudioTranscription is deprecated. Use GeminiStreamingService instead.",
+            category: .general
+        )
     }
     
     // Check if Gemini transcription is enabled and configured

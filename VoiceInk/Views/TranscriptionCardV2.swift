@@ -17,6 +17,7 @@ struct TranscriptionCardV2: View {
     let isSelected: Bool
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var enhancementService: AIEnhancementService
+    @StateObject private var audioManager = AudioTranscriptionManager.shared
     
     @StateObject private var viewModel: TranscriptionCardViewModel
     
@@ -54,6 +55,18 @@ struct TranscriptionCardV2: View {
     }
 
     var body: some View {
+        ZStack {
+            // Main card content
+            cardContent
+            
+            // Progress overlay (only when this transcription is being re-transcribed)
+            if audioManager.activeRetranscriptions.contains(transcription.id) {
+                retranscriptionProgressOverlay
+            }
+        }
+    }
+    
+    private var cardContent: some View {
         VStack(alignment: .leading, spacing: isExpanded ? 16 : 12) {
             // Header with metadata and indicators (always visible)
             headerView
@@ -159,6 +172,23 @@ struct TranscriptionCardV2: View {
             }
             .padding(.top, 16)
         )
+    }
+    
+    private var retranscriptionProgressOverlay: some View {
+        StreamingProgressView(
+            streamingState: audioManager.streamingState,
+            liveText: audioManager.liveTranscriptionText,
+            context: .reTranscription,
+            variant: isExpanded ? .full : .compact,
+            onCancel: {
+                audioManager.cancelStreamingProcessing()
+            }
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.black.opacity(0.3))
+        )
+        .animation(.easeInOut(duration: 0.3), value: audioManager.activeRetranscriptions.contains(transcription.id))
     }
 
     // MARK: - Computed Properties (delegated to ViewModel)

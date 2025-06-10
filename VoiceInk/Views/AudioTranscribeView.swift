@@ -1,7 +1,7 @@
-import SwiftUI
-import SwiftData
-import UniformTypeIdentifiers
 import AVFoundation
+import SwiftData
+import SwiftUI
+import UniformTypeIdentifiers
 
 struct AudioTranscribeView: View {
     @Environment(\.modelContext) private var modelContext
@@ -12,7 +12,9 @@ struct AudioTranscribeView: View {
     @State private var isAudioFileSelected = false
     @State private var isEnhancementEnabled = false
     @State private var selectedPromptId: UUID?
-    
+    @State private var useStreamingMode = true
+    @State private var showStreamingInfo = false
+
     var body: some View {
         VStack(spacing: 0) {
             if transcriptionManager.isProcessing {
@@ -20,23 +22,35 @@ struct AudioTranscribeView: View {
             } else {
                 dropZoneView
             }
-            
+
             Divider()
                 .padding(.vertical)
-            
+
             // Show current transcription result
             if let transcription = transcriptionManager.currentTranscription {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Transcription Result")
                             .font(.headline)
-                        
-                        if let enhancedText = transcription.enhancedText {
+
+                        // Get the latest transcription text (V2 format support)
+                        let transcriptionText = transcription.latestVersion?.text ?? transcription.text
+                        let latestEnhancement = transcription.latestEnhancement
+
+                        if let enhancedText = latestEnhancement?.enhancedText {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     Text("Enhanced")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
+                                    
+                                    // Show enhancement method if available
+                                    if let method = latestEnhancement?.enhancementMethod {
+                                        Text("(\(method))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
                                     Spacer()
                                     HStack(spacing: 8) {
                                         AnimatedCopyButton(textToCopy: enhancedText)
@@ -46,9 +60,9 @@ struct AudioTranscribeView: View {
                                 Text(enhancedText)
                                     .textSelection(.enabled)
                             }
-                            
+
                             Divider()
-                            
+
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     Text("Original")
@@ -56,11 +70,11 @@ struct AudioTranscribeView: View {
                                         .foregroundColor(.secondary)
                                     Spacer()
                                     HStack(spacing: 8) {
-                                        AnimatedCopyButton(textToCopy: transcription.text)
-                                        AnimatedSaveButton(textToSave: transcription.text)
+                                        AnimatedCopyButton(textToCopy: transcriptionText)
+                                        AnimatedSaveButton(textToSave: transcriptionText)
                                     }
                                 }
-                                Text(transcription.text)
+                                Text(transcriptionText)
                                     .textSelection(.enabled)
                             }
                         } else {
@@ -69,17 +83,25 @@ struct AudioTranscribeView: View {
                                     Text("Transcription")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
+                                    
+                                    // Show transcription method if available (V2 format)
+                                    if let method = transcription.latestVersion?.transcriptionMethod {
+                                        Text("(\(method))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                    
                                     Spacer()
                                     HStack(spacing: 8) {
-                                        AnimatedCopyButton(textToCopy: transcription.text)
-                                        AnimatedSaveButton(textToSave: transcription.text)
+                                        AnimatedCopyButton(textToCopy: transcriptionText)
+                                        AnimatedSaveButton(textToSave: transcriptionText)
                                     }
                                 }
-                                Text(transcription.text)
+                                Text(transcriptionText)
                                     .textSelection(.enabled)
                             }
                         }
-                        
+
                         HStack {
                             Text("Duration: \(formatDuration(transcription.duration))")
                                 .font(.caption)
@@ -101,14 +123,14 @@ struct AudioTranscribeView: View {
             }
         }
     }
-    
+
     private var dropZoneView: some View {
         VStack(spacing: 16) {
             if isAudioFileSelected {
                 VStack(spacing: 16) {
                     Text("Audio file selected: \(selectedAudioURL?.lastPathComponent ?? "")")
                         .font(.headline)
-                    
+
                     // AI Enhancement Settings
                     if let enhancementService = whisperState.getEnhancementService() {
                         VStack(spacing: 16) {
@@ -119,16 +141,16 @@ struct AudioTranscribeView: View {
                                     .onChange(of: isEnhancementEnabled) { oldValue, newValue in
                                         enhancementService.isEnhancementEnabled = newValue
                                     }
-                                
+
                                 if isEnhancementEnabled {
                                     Divider()
                                         .frame(height: 20)
-                                    
+
                                     // Prompt Selection
                                     HStack(spacing: 8) {
                                         Text("Prompt:")
                                             .font(.subheadline)
-                                        
+
                                         Menu {
                                             ForEach(enhancementService.allPrompts) { prompt in
                                                 Button {
@@ -148,8 +170,12 @@ struct AudioTranscribeView: View {
                                             }
                                         } label: {
                                             HStack {
-                                                Text(enhancementService.allPrompts.first(where: { $0.id == selectedPromptId })?.title ?? "Select Prompt")
-                                                    .foregroundColor(.primary)
+                                                Text(
+                                                    enhancementService.allPrompts.first(where: {
+                                                        $0.id == selectedPromptId
+                                                    })?.title ?? "Select Prompt"
+                                                )
+                                                .foregroundColor(.primary)
                                                 Image(systemName: "chevron.down")
                                                     .font(.caption)
                                             }
@@ -179,20 +205,38 @@ struct AudioTranscribeView: View {
                             selectedPromptId = enhancementService.selectedPromptId
                         }
                     }
-                    
+
                     // Action Buttons in a row
                     HStack(spacing: 12) {
                         Button("Start Transcription") {
                             if let url = selectedAudioURL {
-                                transcriptionManager.startProcessing(
-                                    url: url,
-                                    modelContext: modelContext,
-                                    whisperState: whisperState
-                                )
+                                print("🎯 [AudioTranscribeView] Starting transcription for file: \(url.lastPathComponent)")
+                                
+                                // Check if streaming mode should be used
+                                let shouldUseStreaming = transcriptionManager.shouldUseStreamingMode(for: url)
+                                print("🎯 [AudioTranscribeView] shouldUseStreamingMode returned: \(shouldUseStreaming)")
+                                
+                                if shouldUseStreaming {
+                                    print("🎯 [AudioTranscribeView] Using STREAMING transcription path")
+                                    Task {
+                                        await transcriptionManager.transcribeWithStreaming(
+                                            audioURL: url,
+                                            modelContext: modelContext,
+                                            whisperState: whisperState
+                                        )
+                                    }
+                                } else {
+                                    print("🎯 [AudioTranscribeView] Using TRADITIONAL transcription path")
+                                    transcriptionManager.startProcessing(
+                                        url: url,
+                                        modelContext: modelContext,
+                                        whisperState: whisperState
+                                    )
+                                }
                             }
                         }
                         .buttonStyle(.borderedProminent)
-                        
+
                         Button("Choose Different File") {
                             selectedAudioURL = nil
                             isAudioFileSelected = false
@@ -215,18 +259,18 @@ struct AudioTranscribeView: View {
                                 )
                                 .foregroundColor(isDropTargeted ? .blue : .gray.opacity(0.5))
                         )
-                    
+
                     VStack(spacing: 16) {
                         Image(systemName: "arrow.down.doc")
                             .font(.system(size: 32))
                             .foregroundColor(isDropTargeted ? .blue : .gray)
-                        
+
                         Text("Drop audio file here")
                             .font(.headline)
-                        
+
                         Text("or")
                             .foregroundColor(.secondary)
-                        
+
                         Button("Choose File") {
                             selectFile()
                         }
@@ -237,7 +281,7 @@ struct AudioTranscribeView: View {
                 .frame(height: 200)
                 .padding(.horizontal)
             }
-            
+
             Text("Supported formats: WAV, MP3, M4A, AIFF")
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -250,21 +294,35 @@ struct AudioTranscribeView: View {
             return true
         }
     }
-    
+
     private var processingView: some View {
         VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(0.8)
-            Text(transcriptionManager.processingPhase.message)
-                .font(.headline)
-            Text(transcriptionManager.messageLog)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+            if transcriptionManager.isStreamingMode {
+                // Use streaming progress view for streaming mode
+                StreamingProgressView(
+                    streamingState: transcriptionManager.streamingState,
+                    liveText: transcriptionManager.liveTranscriptionText,
+                    onCancel: {
+                        transcriptionManager.cancelStreamingProcessing()
+                    }
+                )
+            } else {
+                // Traditional processing view
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text(transcriptionManager.processingPhase.message)
+                        .font(.headline)
+                    Text(transcriptionManager.messageLog)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
         }
         .padding()
     }
-    
+
     private func selectFile() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
@@ -275,9 +333,9 @@ struct AudioTranscribeView: View {
             .wav,
             .mp3,
             .mpeg4Audio,
-            .aiff
+            .aiff,
         ]
-        
+
         if panel.runModal() == .OK {
             if let url = panel.url {
                 selectedAudioURL = url
@@ -285,12 +343,13 @@ struct AudioTranscribeView: View {
             }
         }
     }
-    
+
     private func handleDroppedFile(_ providers: [NSItemProvider]) async {
         guard let provider = providers.first else { return }
-        
+
         if provider.hasItemConformingToTypeIdentifier(UTType.audio.identifier) {
-            try? await provider.loadItem(forTypeIdentifier: UTType.audio.identifier) { item, error in
+            try? await provider.loadItem(forTypeIdentifier: UTType.audio.identifier) {
+                item, error in
                 if let url = item as? URL {
                     Task { @MainActor in
                         selectedAudioURL = url
@@ -300,10 +359,10 @@ struct AudioTranscribeView: View {
             }
         }
     }
-    
+
     private func formatDuration(_ duration: TimeInterval) -> String {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-} 
+}

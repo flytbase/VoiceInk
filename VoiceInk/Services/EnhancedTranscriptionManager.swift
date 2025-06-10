@@ -2,16 +2,22 @@ import Foundation
 import SwiftData
 import SwiftUI
 import os
+import AVFoundation
 
 class EnhancedTranscriptionManager: ObservableObject {
     static let shared = EnhancedTranscriptionManager()
     
+    // Legacy properties for backward compatibility
     @Published var isProcessing = false
     @Published var processingProgress: Double = 0.0
     @Published var processingMessage = ""
     @Published var errorMessage: String?
     
+    // New re-transcription specific state
+    @Published var isRetranscribing = false
+    
     private let loggingService: LoggingService
+    private let audioTranscriptionManager = AudioTranscriptionManager.shared
     
     private init(loggingService: LoggingService = LoggingService.shared) {
         self.loggingService = loggingService
@@ -29,7 +35,7 @@ class EnhancedTranscriptionManager: ObservableObject {
         
         // Log start of re-transcription
         loggingService.info(
-            "Starting re-transcription with versioning",
+            "Starting re-transcription with versioning (delegated to AudioTranscriptionManager)",
             category: .transcription,
             context: [
                 "transcription_id": transcriptionId,
@@ -55,115 +61,28 @@ class EnhancedTranscriptionManager: ObservableObject {
             throw EnhancedTranscriptionError.audioFileNotFound
         }
         
+        // Set re-transcription state
+        isRetranscribing = true
         isProcessing = true
-        processingProgress = 0.0
-        processingMessage = "Starting re-transcription..."
         errorMessage = nil
         
         defer {
+            isRetranscribing = false
             isProcessing = false
             processingProgress = 0.0
             processingMessage = ""
         }
         
         do {
-            // Determine current transcription method
-            let transcriptionMethod = getCurrentTranscriptionMethod()
-            loggingService.debug(
-                "Selected transcription method",
-                category: .transcription,
-                context: [
-                    "transcription_id": transcriptionId,
-                    "method": transcriptionMethod,
-                    "source": "EnhancedTranscriptionManager"
-                ]
+            // Delegate to AudioTranscriptionManager for actual transcription
+            // This will use the same rich progress states as the main transcription flow
+            await audioTranscriptionManager.transcribeWithStreaming(
+                audioURL: audioURL,
+                modelContext: modelContext,
+                whisperState: whisperState,
+                isRetranscription: true,
+                originalTranscription: transcription
             )
-            
-            processingMessage = "Transcribing with \(transcriptionMethod)..."
-            processingProgress = 0.3
-            
-            // Perform transcription
-            let newText = try await performTranscription(audioURL: audioURL, whisperState: whisperState)
-            processingProgress = 0.8
-            
-            loggingService.debug(
-                "Transcription completed, creating new version",
-                category: .transcription,
-                context: [
-                    "transcription_id": transcriptionId,
-                    "new_text_length": "\(newText.count)",
-                    "method": transcriptionMethod,
-                    "source": "EnhancedTranscriptionManager"
-                ]
-            )
-            
-            // Create new version
-            let newVersion = TranscriptionVersion(
-                text: newText,
-                transcriptionMethod: transcriptionMethod,
-                promptUsed: getCurrentPrompt(),
-                isMainVersion: true // New version becomes main
-            )
-            
-            transcription.addTranscriptionVersion(newVersion)
-            
-            // Handle enhancement if enabled
-            if let enhancementService = await whisperState.enhancementService,
-               enhancementService.isEnhancementEnabled,
-               enhancementService.isConfigured {
-                
-                loggingService.debug(
-                    "Starting AI enhancement for new version",
-                    category: .enhancement,
-                    context: [
-                        "transcription_id": transcriptionId,
-                        "version_id": newVersion.id.uuidString,
-                        "text_length": "\(newText.count)",
-                        "source": "EnhancedTranscriptionManager"
-                    ]
-                )
-                
-                processingMessage = "Enhancing transcription..."
-                processingProgress = 0.9
-                
-                do {
-                    let enhancedText = try await enhancementService.enhance(newText)
-                    let enhancementVersion = EnhancementVersion(
-                        enhancedText: enhancedText,
-                        enhancementMethod: "AI Enhancement",
-                        baseVersionId: newVersion.id
-                    )
-                    transcription.addEnhancementVersion(enhancementVersion)
-                    
-                    loggingService.info(
-                        "Enhancement completed successfully",
-                        category: .enhancement,
-                        context: [
-                            "transcription_id": transcriptionId,
-                            "version_id": newVersion.id.uuidString,
-                            "enhanced_text_length": "\(enhancedText.count)",
-                            "source": "EnhancedTranscriptionManager"
-                        ]
-                    )
-                } catch {
-                    loggingService.warning(
-                        "Enhancement failed, continuing without enhancement",
-                        category: .enhancement,
-                        context: [
-                            "transcription_id": transcriptionId,
-                            "version_id": newVersion.id.uuidString,
-                            "error_domain": (error as NSError).domain,
-                            "error_code": "\((error as NSError).code)",
-                            "source": "EnhancedTranscriptionManager"
-                        ]
-                    )
-                    // Continue without enhancement
-                }
-            }
-            
-            try modelContext.save()
-            processingProgress = 1.0
-            processingMessage = "Re-transcription completed!"
             
             let processingTime = Date().timeIntervalSince(startTime)
             
@@ -173,17 +92,11 @@ class EnhancedTranscriptionManager: ObservableObject {
                 context: [
                     "transcription_id": transcriptionId,
                     "processing_time": String(format: "%.2f", processingTime),
-                    "method": transcriptionMethod,
                     "new_versions_count": "\(transcription.transcriptionVersions.count)",
                     "total_enhancements": "\(transcription.enhancementVersions.count)",
                     "source": "EnhancedTranscriptionManager"
                 ]
             )
-            
-            // Clear success message after delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                self.processingMessage = ""
-            }
             
         } catch {
             let processingTime = Date().timeIntervalSince(startTime)
@@ -280,11 +193,14 @@ class EnhancedTranscriptionManager: ObservableObject {
             )
             
             let enhancedText = try await enhancementService.enhance(version.text)
+            let enhancementMethod = enhancementService.activePrompt?.title ?? "AI Enhancement"
+            let enhancementPrompt = enhancementService.activePrompt?.promptText
             
             let enhancementVersion = EnhancementVersion(
                 enhancedText: enhancedText,
-                enhancementMethod: "AI Enhancement",
-                baseVersionId: version.id
+                enhancementMethod: enhancementMethod,  // Dynamic method name
+                baseVersionId: version.id,
+                enhancementPrompt: enhancementPrompt
             )
             
             transcription.addEnhancementVersion(enhancementVersion)
@@ -331,63 +247,16 @@ class EnhancedTranscriptionManager: ObservableObject {
         }
     }
     
-    // MARK: - Helper Methods
+    // MARK: - Cancellation Support
     
-    private func getCurrentTranscriptionMethod() -> String {
-        let geminiTranscription = GeminiAudioTranscription.shared
-        if geminiTranscription.isEnabled && geminiTranscription.isConfigured {
-            return "Gemini 2.5 Pro"
-        } else {
-            // Get current Whisper model name
-            return UserDefaults.standard.string(forKey: "CurrentWhisperModel") ?? "Whisper"
-        }
-    }
-    
-    private func getCurrentPrompt() -> String? {
-        let geminiTranscription = GeminiAudioTranscription.shared
-        if geminiTranscription.isEnabled && geminiTranscription.isConfigured {
-            // Get current transcription prompt if using cloud
-            return TranscriptionPromptService().selectedPrompt?.prompt
-        }
-        return nil
-    }
-    
-    private func performTranscription(audioURL: URL, whisperState: WhisperState) async throws -> String {
-        let geminiTranscription = GeminiAudioTranscription.shared
-        
-        if geminiTranscription.isEnabled && geminiTranscription.isConfigured {
-            // Use Gemini transcription
-            let selectedLanguage = UserDefaults.standard.string(forKey: "SelectedLanguage") ?? "auto"
-            var text = try await geminiTranscription.transcribe(audioURL: audioURL, language: selectedLanguage)
-            
-            // Apply word replacements if enabled
-            if UserDefaults.standard.bool(forKey: "IsWordReplacementEnabled") {
-                text = WordReplacementService.shared.applyReplacements(to: text)
-            }
-            
-            return text
-        } else {
-            // Use Whisper transcription
-            guard let currentModel = await whisperState.currentModel else {
-                throw EnhancedTranscriptionError.noModelSelected
-            }
-            
-            let whisperContext = try await WhisperContext.createContext(path: currentModel.url.path)
-            let audioProcessor = AudioProcessor()
-            let samples = try await audioProcessor.processAudioToSamples(audioURL)
-            
-            await whisperContext.setPrompt(whisperState.whisperPrompt.transcriptionPrompt)
-            await whisperContext.fullTranscribe(samples: samples)
-            var text = await whisperContext.getTranscription()
-            text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            text = WhisperTextFormatter.format(text)
-            
-            // Apply word replacements if enabled
-            if UserDefaults.standard.bool(forKey: "IsWordReplacementEnabled") {
-                text = WordReplacementService.shared.applyReplacements(to: text)
-            }
-            
-            return text
+    @MainActor
+    func cancelRetranscription() {
+        if isRetranscribing {
+            audioTranscriptionManager.cancelStreamingProcessing()
+            isRetranscribing = false
+            isProcessing = false
+            processingProgress = 0.0
+            processingMessage = ""
         }
     }
 }
