@@ -7,17 +7,24 @@ class WindowManager {
     private init() {}
     
     func configureWindow(_ window: NSWindow) {
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        // Configure all safe properties that work in both windowed and full screen modes
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.backgroundColor = .windowBackgroundColor
         window.isReleasedWhenClosed = false
         window.title = "VoiceInk"
-        window.collectionBehavior = [.fullScreenPrimary]
         window.level = .normal
         window.isOpaque = true
         window.isMovableByWindowBackground = false
+        window.collectionBehavior = [.fullScreenPrimary]
         window.minSize = NSSize(width: 0, height: 0)
+        
+        // Only set styleMask if we're not in full screen mode
+        // This prevents the crash when trying to modify full screen windows
+        if !window.styleMask.contains(.fullScreen) {
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        }
+        
         window.orderFrontRegardless()
     }
     
@@ -69,4 +76,4 @@ class WindowStateDelegate: NSObject, NSWindowDelegate {
         guard let _ = notification.object as? NSWindow else { return }
         NSApp.activate(ignoringOtherApps: true)
     }
-} 
+}
