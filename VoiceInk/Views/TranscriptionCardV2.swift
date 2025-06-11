@@ -232,7 +232,7 @@ struct TranscriptionCardV2: View {
     // MARK: - Expanded Text View
 
     private var expandedTextView: some View {
-        HStack(spacing: 16) {
+        VStack(spacing: 16) {
             // Raw Transcription Panel
             VStack(alignment: .leading, spacing: 8) {
                 // Header with title and show more button
@@ -270,7 +270,7 @@ struct TranscriptionCardV2: View {
                 Text(selectedTranscriptionVersion?.text ?? transcription.text)
                     .font(.body)
                     .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                     .lineLimit(viewModel.uiState.showMoreRawText ? nil : 3)
                     .padding(12)
                     .background(
@@ -278,6 +278,7 @@ struct TranscriptionCardV2: View {
                             .fill(Color(.textBackgroundColor))
                             .stroke(Color(.separatorColor), lineWidth: 1)
                     )
+                    .animation(.easeInOut(duration: 0.3), value: viewModel.uiState.showMoreRawText)
             }
 
             // Enhanced Text Panel
@@ -353,10 +354,7 @@ struct TranscriptionCardV2: View {
                                 Text(enhancement.enhancedText)
                                     .font(.body)
                                     .textSelection(.enabled)
-                                    .frame(
-                                        maxWidth: .infinity, maxHeight: .infinity,
-                                        alignment: .topLeading
-                                    )
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
                                     .lineLimit(viewModel.uiState.showMoreEnhancedText ? nil : 3)
                                     .padding(12)
                                     .background(
@@ -364,14 +362,12 @@ struct TranscriptionCardV2: View {
                                             .fill(Color.purple.opacity(0.05))
                                             .stroke(Color.purple.opacity(0.3), lineWidth: 1)
                                     )
+                                    .animation(.easeInOut(duration: 0.3), value: viewModel.uiState.showMoreEnhancedText)
                             } else if let latestEnhancement = enhancements.first {
                                 Text(latestEnhancement.enhancedText)
                                     .font(.body)
                                     .textSelection(.enabled)
-                                    .frame(
-                                        maxWidth: .infinity, maxHeight: .infinity,
-                                        alignment: .topLeading
-                                    )
+                                    .frame(maxWidth: .infinity, alignment: .topLeading)
                                     .lineLimit(viewModel.uiState.showMoreEnhancedText ? nil : 3)
                                     .padding(12)
                                     .background(
@@ -379,6 +375,7 @@ struct TranscriptionCardV2: View {
                                             .fill(Color.purple.opacity(0.05))
                                             .stroke(Color.purple.opacity(0.3), lineWidth: 1)
                                     )
+                                    .animation(.easeInOut(duration: 0.3), value: viewModel.uiState.showMoreEnhancedText)
                             }
                         } else {
                             VStack(spacing: 8) {

@@ -14,6 +14,8 @@ struct AudioTranscribeView: View {
     @State private var selectedPromptId: UUID?
     @State private var useStreamingMode = true
     @State private var showStreamingInfo = false
+    @State private var audioContext = ""
+    @State private var isAudioContextEnabled = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,7 +36,8 @@ struct AudioTranscribeView: View {
                             .font(.headline)
 
                         // Get the latest transcription text (V2 format support)
-                        let transcriptionText = transcription.latestVersion?.text ?? transcription.text
+                        let transcriptionText =
+                            transcription.latestVersion?.text ?? transcription.text
                         let latestEnhancement = transcription.latestEnhancement
 
                         if let enhancedText = latestEnhancement?.enhancedText {
@@ -43,14 +46,14 @@ struct AudioTranscribeView: View {
                                     Text("Enhanced")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
-                                    
+
                                     // Show enhancement method if available
                                     if let method = latestEnhancement?.enhancementMethod {
                                         Text("(\(method))")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
-                                    
+
                                     Spacer()
                                     HStack(spacing: 8) {
                                         AnimatedCopyButton(textToCopy: enhancedText)
@@ -83,14 +86,15 @@ struct AudioTranscribeView: View {
                                     Text("Transcription")
                                         .font(.subheadline)
                                         .foregroundColor(.secondary)
-                                    
+
                                     // Show transcription method if available (V2 format)
-                                    if let method = transcription.latestVersion?.transcriptionMethod {
+                                    if let method = transcription.latestVersion?.transcriptionMethod
+                                    {
                                         Text("(\(method))")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
                                     }
-                                    
+
                                     Spacer()
                                     HStack(spacing: 8) {
                                         AnimatedCopyButton(textToCopy: transcriptionText)
@@ -206,31 +210,138 @@ struct AudioTranscribeView: View {
                         }
                     }
 
+                    // Audio Context Section - Toggle Style (like AI Enhancement)
+                    VStack(spacing: 16) {
+                        // Audio Context Toggle and Input in the same row style
+                        HStack(spacing: 16) {
+                            Toggle("Audio Context", isOn: $isAudioContextEnabled)
+                                .toggleStyle(.switch)
+                                .onChange(of: isAudioContextEnabled) { oldValue, newValue in
+                                    if !newValue {
+                                        // Clear context when disabled
+                                        audioContext = ""
+                                    }
+                                }
+
+                            if isAudioContextEnabled {
+                                Divider()
+                                    .frame(height: 20)
+
+                                // Context Input Field
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text("Context:")
+                                            .font(.subheadline)
+                                        
+                                        Spacer()
+                                        
+                                        if !audioContext.isEmpty {
+                                            Text("\(audioContext.count) chars")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+
+                                    TextEditor(text: $audioContext)
+                                        .font(.body)
+                                        .frame(minHeight: 60, maxHeight: 80)
+                                        .padding(6)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .fill(Color(.textBackgroundColor))
+                                                .stroke(Color(.separatorColor), lineWidth: 1)
+                                        )
+                                        .overlay(
+                                            Group {
+                                                if audioContext.isEmpty {
+                                                    VStack {
+                                                        HStack {
+                                                            Text("e.g., Meeting with John (CEO) and Sarah (CTO) about Q4 planning...")
+                                                                .font(.caption)
+                                                                .foregroundColor(.secondary.opacity(0.7))
+                                                                .padding(.top, 6)
+                                                                .padding(.leading, 6)
+                                                            Spacer()
+                                                        }
+                                                        Spacer()
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    
+                                    HStack {
+                                        Text("Examples: speaker names, meeting topic, technical terms, language")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                        
+                                        Spacer()
+                                        
+                                        if !audioContext.isEmpty {
+                                            Button("Clear") {
+                                                audioContext = ""
+                                            }
+                                            .font(.caption)
+                                            .foregroundColor(.blue)
+                                        }
+                                    }
+                                }
+                                .disabled(!isAudioContextEnabled)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(.windowBackgroundColor).opacity(0.4))
+                        )
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+
                     // Action Buttons in a row
                     HStack(spacing: 12) {
                         Button("Start Transcription") {
                             if let url = selectedAudioURL {
-                                print("🎯 [AudioTranscribeView] Starting transcription for file: \(url.lastPathComponent)")
-                                
+                                print(
+                                    "🎯 [AudioTranscribeView] Starting transcription for file: \(url.lastPathComponent)"
+                                )
+
+                                // Prepare context for transcription
+                                let contextToUse = audioContext.trimmingCharacters(
+                                    in: .whitespacesAndNewlines)
+                                if !contextToUse.isEmpty {
+                                    print(
+                                        "🎯 [AudioTranscribeView] Using audio context: \(contextToUse)"
+                                    )
+                                }
+
                                 // Check if streaming mode should be used
-                                let shouldUseStreaming = transcriptionManager.shouldUseStreamingMode(for: url)
-                                print("🎯 [AudioTranscribeView] shouldUseStreamingMode returned: \(shouldUseStreaming)")
-                                
+                                let shouldUseStreaming =
+                                    transcriptionManager.shouldUseStreamingMode(for: url)
+                                print(
+                                    "🎯 [AudioTranscribeView] shouldUseStreamingMode returned: \(shouldUseStreaming)"
+                                )
+
                                 if shouldUseStreaming {
-                                    print("🎯 [AudioTranscribeView] Using STREAMING transcription path")
+                                    print(
+                                        "🎯 [AudioTranscribeView] Using STREAMING transcription path"
+                                    )
                                     Task {
                                         await transcriptionManager.transcribeWithStreaming(
                                             audioURL: url,
                                             modelContext: modelContext,
-                                            whisperState: whisperState
+                                            whisperState: whisperState,
+                                            audioContext: contextToUse.isEmpty ? nil : contextToUse
                                         )
                                     }
                                 } else {
-                                    print("🎯 [AudioTranscribeView] Using TRADITIONAL transcription path")
+                                    print(
+                                        "🎯 [AudioTranscribeView] Using TRADITIONAL transcription path"
+                                    )
                                     transcriptionManager.startProcessing(
                                         url: url,
                                         modelContext: modelContext,
-                                        whisperState: whisperState
+                                        whisperState: whisperState,
+                                        audioContext: contextToUse.isEmpty ? nil : contextToUse
                                     )
                                 }
                             }
@@ -240,6 +351,8 @@ struct AudioTranscribeView: View {
                         Button("Choose Different File") {
                             selectedAudioURL = nil
                             isAudioFileSelected = false
+                            audioContext = ""  // Clear context when selecting new file
+                            isAudioContextEnabled = false  // Disable context toggle
                         }
                         .buttonStyle(.bordered)
                     }

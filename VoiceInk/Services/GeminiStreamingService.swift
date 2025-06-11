@@ -172,14 +172,14 @@ class GeminiStreamingService {
     func deleteFile(uri: String) async throws {
         let sessionId = UUID().uuidString
         let fileId = extractFileId(from: uri)
-        
+
         loggingService.info(
             "Starting Gemini file deletion",
             category: .network,
             context: [
                 "session_id": sessionId,
                 "file_uri": uri,
-                "extracted_file_id": fileId
+                "extracted_file_id": fileId,
             ]
         )
 
@@ -205,7 +205,7 @@ class GeminiStreamingService {
                 "session_id": sessionId,
                 "delete_url": deleteURL.absoluteString,
                 "method": "DELETE",
-                "timeout": "\(request.timeoutInterval)s"
+                "timeout": "\(request.timeoutInterval)s",
             ]
         )
 
@@ -217,8 +217,8 @@ class GeminiStreamingService {
             "Delete request headers",
             category: .network,
             context: [
-            "session_id": sessionId,
-            "headers": headers
+                "session_id": sessionId,
+                "headers": headers,
             ]
         )
 
@@ -230,7 +230,7 @@ class GeminiStreamingService {
                 category: .network,
                 context: [
                     "session_id": sessionId,
-                    "response_type": String(describing: type(of: response))
+                    "response_type": String(describing: type(of: response)),
                 ]
             )
             throw StreamingError.cleanupFailed("Invalid response")
@@ -245,7 +245,7 @@ class GeminiStreamingService {
                 "session_id": sessionId,
                 "status_code": "\(httpResponse.statusCode)",
                 "response_size": "\(data.count) bytes",
-                "response_body": responseString
+                "response_body": responseString,
             ]
         )
         // Log all response headers together in a single log entry
@@ -256,8 +256,8 @@ class GeminiStreamingService {
             "Delete response headers",
             category: .network,
             context: [
-            "session_id": sessionId,
-            "headers": responseHeaders
+                "session_id": sessionId,
+                "headers": responseHeaders,
             ]
         )
 
@@ -270,7 +270,7 @@ class GeminiStreamingService {
                     "file_uri": uri,
                     "file_id": fileId,
                     "status_code": "\(httpResponse.statusCode)",
-                    "response_body": responseString
+                    "response_body": responseString,
                 ]
             )
             throw StreamingError.cleanupFailed("HTTP \(httpResponse.statusCode)")
@@ -282,7 +282,7 @@ class GeminiStreamingService {
             context: [
                 "session_id": sessionId,
                 "file_uri": uri,
-                "file_id": fileId
+                "file_id": fileId,
             ]
         )
     }
@@ -399,7 +399,7 @@ class GeminiStreamingService {
             let elapsed = Date().timeIntervalSince(startTime)
             let estimatedDuration = Double(request.httpBody?.count ?? 0) / (512 * 1024)  // More realistic upload speed estimate
             let progress = min(elapsed / max(estimatedDuration, 1.0), 0.95)
-            
+
             // Ensure main thread dispatch for UI updates
             DispatchQueue.main.async {
                 progressCallback(progress)
@@ -792,18 +792,19 @@ class GeminiStreamingService {
         request.setValue(apiKey, forHTTPHeaderField: "X-goog-api-key")
         request.timeoutInterval = StreamingConfiguration.streamingTimeout
 
+        let mimeType = getMimeType(for: URL(string: fileURI) ?? URL(fileURLWithPath: fileURI))
         let requestBody: [String: Any] = [
             "contents": [
                 [
                     "parts": [
                         ["text": prompt],
-                        ["fileData": ["fileUri": fileURI, "mimeType": "audio/mpeg"]],
+                        ["fileData": ["fileUri": fileURI, "mimeType": mimeType]],
                     ]
                 ]
             ],
             "generationConfig": [
                 "temperature": 0.1,
-                "maxOutputTokens": 8192,
+                "maxOutputTokens": 65500,
             ],
         ]
 
@@ -1153,7 +1154,7 @@ class GeminiStreamingService {
         if let lastComponent = uri.components(separatedBy: "/").last, !lastComponent.isEmpty {
             return lastComponent
         }
-        
+
         // Fallback for relative paths like "files/abc123"
         return uri.replacingOccurrences(of: "files/", with: "")
     }

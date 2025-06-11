@@ -19,7 +19,7 @@ class AudioTranscriptionManager: ObservableObject {
     @Published var streamingProgress: StreamingProgress = StreamingProgress()
     @Published var liveTranscriptionText: String = ""
     @Published var isStreamingMode: Bool = false
-    
+
     // NEW: Re-transcription tracking
     @Published var activeRetranscriptions: Set<UUID> = []
 
@@ -69,7 +69,10 @@ class AudioTranscriptionManager: ObservableObject {
         self.loggingService = loggingService
     }
 
-    func startProcessing(url: URL, modelContext: ModelContext, whisperState: WhisperState) {
+    func startProcessing(
+        url: URL, modelContext: ModelContext, whisperState: WhisperState,
+        audioContext: String? = nil
+    ) {
         let startTime = Date()
         let sessionId = UUID().uuidString
         let audioFileName = url.lastPathComponent
@@ -372,7 +375,8 @@ class AudioTranscriptionManager: ObservableObject {
         whisperState: WhisperState,
         isRetranscription: Bool = false,
         originalTranscription: Transcription? = nil,
-        transcriptionId: UUID? = nil
+        transcriptionId: UUID? = nil,
+        audioContext: String? = nil
     ) async {
         let sessionId = UUID().uuidString
         let startTime = Date()
@@ -453,9 +457,23 @@ class AudioTranscriptionManager: ObservableObject {
                 // Get the selected prompt from TranscriptionPromptService
                 let promptService = TranscriptionPromptService()
                 let selectedPrompt = promptService.selectedPrompt
-                let prompt =
+                var prompt =
                     selectedPrompt?.prompt
                     ?? "Please transcribe this audio file accurately. Provide the complete transcription without any additional commentary."
+
+                // Append audio context if provided
+                if let context = audioContext, !context.isEmpty {
+                    prompt += "\n\nAdditional Context: \(context)"
+                    loggingService.debug(
+                        "Added audio context to prompt",
+                        category: .transcription,
+                        context: [
+                            "session_id": sessionId,
+                            "context_length": "\(context.count)",
+                            "context_preview": String(context.prefix(100)),
+                        ]
+                    )
+                }
 
                 var fullTranscriptionText = ""
 
@@ -529,7 +547,7 @@ class AudioTranscriptionManager: ObservableObject {
                 // Get the actual selected model name
                 let aiService = AIService()
                 let selectedModel = aiService.currentModel
-                
+
                 // Save transcription
                 if isRetranscription, let original = originalTranscription {
                     // Create new version for existing transcription
@@ -544,9 +562,10 @@ class AudioTranscriptionManager: ObservableObject {
 
                     // Create enhancement version if enhanced text exists
                     if let enhanced = enhancedText,
-                       let enhancementService = whisperState.enhancementService,
-                       let activePrompt = enhancementService.activePrompt {
-                        
+                        let enhancementService = whisperState.enhancementService,
+                        let activePrompt = enhancementService.activePrompt
+                    {
+
                         let enhancementVersion = EnhancementVersion(
                             enhancedText: enhanced,
                             enhancementMethod: activePrompt.title,  // e.g., "Grammar Correction"
@@ -579,9 +598,10 @@ class AudioTranscriptionManager: ObservableObject {
 
                     // Create enhancement version if enhanced text exists
                     if let enhanced = enhancedText,
-                       let enhancementService = whisperState.enhancementService,
-                       let activePrompt = enhancementService.activePrompt {
-                        
+                        let enhancementService = whisperState.enhancementService,
+                        let activePrompt = enhancementService.activePrompt
+                    {
+
                         let enhancementVersion = EnhancementVersion(
                             enhancedText: enhanced,
                             enhancementMethod: activePrompt.title,  // e.g., "Grammar Correction"
@@ -654,11 +674,15 @@ class AudioTranscriptionManager: ObservableObject {
 
     /// Determines if streaming mode should be used for a given file
     func shouldUseStreamingMode(for url: URL) -> Bool {
-        print("🔍 [AudioTranscriptionManager] shouldUseStreamingMode called for: \(url.lastPathComponent)")
-        
+        print(
+            "🔍 [AudioTranscriptionManager] shouldUseStreamingMode called for: \(url.lastPathComponent)"
+        )
+
         // Check if streaming is enabled in settings
         let streamingEnabled = StreamingConfiguration.streamingEnabled
-        print("🔍 [AudioTranscriptionManager] StreamingConfiguration.streamingEnabled: \(streamingEnabled)")
+        print(
+            "🔍 [AudioTranscriptionManager] StreamingConfiguration.streamingEnabled: \(streamingEnabled)"
+        )
         guard streamingEnabled else {
             print("❌ [AudioTranscriptionManager] Streaming DISABLED in settings - returning false")
             return false
@@ -671,7 +695,9 @@ class AudioTranscriptionManager: ObservableObject {
             print("✅ [AudioTranscriptionManager] Gemini configuration is VALID - returning TRUE")
             return true
         } catch {
-            print("❌ [AudioTranscriptionManager] Gemini configuration INVALID: \(error.localizedDescription)")
+            print(
+                "❌ [AudioTranscriptionManager] Gemini configuration INVALID: \(error.localizedDescription)"
+            )
             return false
         }
     }
