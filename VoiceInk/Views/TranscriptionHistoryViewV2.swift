@@ -20,7 +20,11 @@ private enum Constants {
 
 @MainActor
 final class TranscriptionHistoryViewModel: ObservableObject {
-    @Published var searchText = ""
+    @Published var searchText = "" {
+        didSet {
+            searchService.search(searchText)
+        }
+    }
     @Published var selectedFilter: SearchFilter = .all
     @Published var selectedTranscriptions = Set<Transcription>()
     @Published var expandedTranscription: Transcription?
@@ -36,17 +40,26 @@ final class TranscriptionHistoryViewModel: ObservableObject {
     
     var enhancementService: AIEnhancementService?
     
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, searchService: OptimizedSearchService) {
         self.modelContext = modelContext
+        self.searchService = searchService
         self.enhancedManager = EnhancedTranscriptionManager.shared
-        self.searchService = OptimizedSearchService.shared
         self.loggingService = LoggingService.shared
         self.enhancementService = AIEnhancementService(modelContext: modelContext)
     }
     
-    func displayedTranscriptions(from transcriptions: [Transcription]) -> [Transcription] {
-        let baseResults = searchText.isEmpty ? transcriptions : searchService.searchResults
-        return applyFilter(to: baseResults)
+    func getDisplayedTranscriptions(from allTranscriptions: [Transcription], searchResults: [Transcription]) -> [Transcription] {
+        // Apply filter first, then search within filtered results (Phase 3)
+        let filteredTranscriptions = applyFilter(to: allTranscriptions)
+        
+        if searchText.isEmpty {
+            return filteredTranscriptions
+        } else {
+            // Search within filtered results for better accuracy
+            return searchResults.filter { transcription in
+                filteredTranscriptions.contains { $0.id == transcription.id }
+            }
+        }
     }
     
     private func applyFilter(to transcriptions: [Transcription]) -> [Transcription] {
@@ -99,18 +112,24 @@ final class TranscriptionHistoryViewModel: ObservableObject {
 
 struct TranscriptionHistoryViewV2: View {
     @Environment(\.modelContext) private var modelContext
-    @StateObject private var viewModel: TranscriptionHistoryViewModel
     @StateObject private var migrationService = VersionMigrationService()
     @StateObject private var loggingService = LoggingService.shared
+    @StateObject private var searchService = OptimizedSearchService.shared
     @Query(sort: \Transcription.timestamp, order: .reverse) private var transcriptions: [Transcription]
     
+    // Create ViewModel with proper ModelContext
+    @StateObject private var viewModel: TranscriptionHistoryViewModel
+    
     init() {
-        // Note: We'll initialize viewModel in onAppear since we need modelContext
-        self._viewModel = StateObject(wrappedValue: TranscriptionHistoryViewModel(modelContext: ModelContext(try! ModelContainer(for: Transcription.self))))
+        // Initialize with a temporary ViewModel - will be updated in onAppear
+        self._viewModel = StateObject(wrappedValue: TranscriptionHistoryViewModel(
+            modelContext: ModelContext(try! ModelContainer(for: Transcription.self)),
+            searchService: OptimizedSearchService.shared
+        ))
     }
     
     private var displayedTranscriptions: [Transcription] {
-        viewModel.displayedTranscriptions(from: transcriptions)
+        viewModel.getDisplayedTranscriptions(from: transcriptions, searchResults: searchService.searchResults)
     }
     
     private var statisticsData: StatisticsData {
@@ -164,7 +183,11 @@ struct TranscriptionHistoryViewV2: View {
             setupView()
         }
         .onChange(of: transcriptions) { _, newTranscriptions in
-            OptimizedSearchService.shared.buildSearchIndex(from: newTranscriptions)
+            searchService.buildSearchIndex(from: newTranscriptions)
+            // Trigger re-search if there's an active query
+            if !viewModel.searchText.isEmpty {
+                searchService.search(viewModel.searchText)
+            }
         }
         .alert("Delete Transcriptions", isPresented: $viewModel.showingDeleteAlert) {
             deleteAlert
@@ -191,14 +214,9 @@ struct TranscriptionHistoryViewV2: View {
     // MARK: - Setup and Actions
     
     private func setupView() {
-        // Reinitialize viewModel with correct modelContext
-        let newViewModel = TranscriptionHistoryViewModel(modelContext: modelContext)
-        // Transfer state if needed
-        newViewModel.searchText = viewModel.searchText
-        newViewModel.selectedFilter = viewModel.selectedFilter
-        
+        // Initialize search index
         checkMigrationStatus()
-        OptimizedSearchService.shared.buildSearchIndex(from: transcriptions)
+        searchService.buildSearchIndex(from: transcriptions)
     }
     
     private func checkMigrationStatus() {
