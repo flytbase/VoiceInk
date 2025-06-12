@@ -13,7 +13,6 @@ private enum Constants {
 
 struct TranscriptionCardV2: View {
     let transcription: Transcription
-    let isExpanded: Bool
     let isSelected: Bool
     @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var enhancementService: AIEnhancementService
@@ -21,9 +20,8 @@ struct TranscriptionCardV2: View {
     
     @StateObject private var viewModel: TranscriptionCardViewModel
     
-    init(transcription: Transcription, isExpanded: Bool, isSelected: Bool = false, viewModel: TranscriptionCardViewModel? = nil) {
+    init(transcription: Transcription, isSelected: Bool = false, viewModel: TranscriptionCardViewModel? = nil) {
         self.transcription = transcription
-        self.isExpanded = isExpanded
         self.isSelected = isSelected
         
         if let providedViewModel = viewModel {
@@ -67,44 +65,36 @@ struct TranscriptionCardV2: View {
     }
     
     private var cardContent: some View {
-        VStack(alignment: .leading, spacing: isExpanded ? 16 : 12) {
-            // Header with metadata and indicators (always visible)
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with metadata and indicators
             headerView
 
-            if isExpanded {
-                // Dual-pane text display with show more/less
-                expandedTextView
-                    .onAppear {
-                        // Set default selections if none are set
-                        // ViewModel handles default selections automatically
-                    }
-                    .onChange(of: viewModel.selectionState.selectedTranscriptionVersionId) { _, newVersionId in
-                        // ViewModel handles auto-selection of enhancements
-                    }
-
-                // Audio Player with waveform (optimized for smooth scrolling)
-                if let urlString = transcription.audioFileURL,
-                    let url = URL(string: urlString),
-                    FileManager.default.fileExists(atPath: url.path)
-                {
-                    Divider()
-                        .padding(.vertical, 8)
-
-                    AudioPlayerView(url: url)
-                        // Safe performance optimizations only
-                        .clipped()  // Prevent rendering outside bounds (safe)
-                        .padding(.horizontal, 4)
+            // Dual-pane text display with show more/less
+            expandedTextView
+                .onAppear {
+                    // Set default selections if none are set
+                    // ViewModel handles default selections automatically
+                }
+                .onChange(of: viewModel.selectionState.selectedTranscriptionVersionId) { _, newVersionId in
+                    // ViewModel handles auto-selection of enhancements
                 }
 
-                // All action buttons (expanded only)
-                expandedActionButtonsView
-            } else {
-                // Text preview (collapsed only)
-                collapsedTextPreview
+            // Audio Player with waveform (optimized for smooth scrolling)
+            if let urlString = transcription.audioFileURL,
+                let url = URL(string: urlString),
+                FileManager.default.fileExists(atPath: url.path)
+            {
+                Divider()
+                    .padding(.vertical, 8)
 
-                // Essential action buttons (collapsed only)
-                collapsedActionButtonsView
+                AudioPlayerView(url: url)
+                    // Safe performance optimizations only
+                    .clipped()  // Prevent rendering outside bounds (safe)
+                    .padding(.horizontal, 4)
             }
+
+            // Action buttons
+            expandedActionButtonsView
         }
         .padding(16)
         // Improved tonal contrast for card background
@@ -179,7 +169,7 @@ struct TranscriptionCardV2: View {
             streamingState: audioManager.streamingState,
             liveText: audioManager.liveTranscriptionText,
             context: .reTranscription,
-            variant: isExpanded ? .full : .compact,
+            variant: .full,
             onCancel: {
                 audioManager.cancelStreamingProcessing()
             }
@@ -215,19 +205,6 @@ struct TranscriptionCardV2: View {
         TranscriptionCardHeader(transcription: transcription)
     }
 
-    // MARK: - Collapsed Text Preview
-
-    private var collapsedTextPreview: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(previewText)
-                .font(.body)
-                .foregroundColor(.primary)
-                .lineLimit(Constants.previewLineLimit)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, 8)
-    }
 
     // MARK: - Expanded Text View
 
@@ -415,28 +392,15 @@ struct TranscriptionCardV2: View {
                     }
                 }
             }
+
+            // Audio Context Panel (if available)
+            if let context = transcription.audioContext, !context.isEmpty {
+                audioContextPanel(context: context)
+            }
         }
     }
 
-    // MARK: - Collapsed Action Buttons
-
-    private var collapsedActionButtonsView: some View {
-        TranscriptionCardActions(
-            transcription: transcription,
-            isExpanded: false,
-            hasEnhancements: hasEnhancements,
-            isRetranscribing: viewModel.processingState.isRetranscribing,
-            isEnhancing: viewModel.processingState.isEnhancing,
-            onCopyRaw: copyRawText,
-            onCopyEnhanced: copyEnhancedText,
-            onRetranscribe: performRetranscribeAction,
-            onEnhance: performEnhanceAction,
-            onDownload: downloadAudio,
-            onDelete: { viewModel.showDeleteAlert() }
-        )
-    }
-
-    // MARK: - Expanded Action Buttons
+    // MARK: - Action Buttons
 
     private var expandedActionButtonsView: some View {
         TranscriptionCardActions(
@@ -455,6 +419,42 @@ struct TranscriptionCardV2: View {
     }
 
 
+
+    // MARK: - Audio Context Panel
+
+    @ViewBuilder
+    private func audioContextPanel(context: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Audio Context")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+
+                Spacer()
+
+                Button(viewModel.uiState.showMoreContext ? "Show Less" : "Show More") {
+                    viewModel.toggleContextExpansion()
+                }
+                .font(.caption)
+                .foregroundColor(.blue)
+                .buttonStyle(.plain)
+            }
+
+            Text(context)
+                .font(.body)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .lineLimit(viewModel.uiState.showMoreContext ? nil : 2)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.05))
+                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+                .animation(.easeInOut(duration: 0.3), value: viewModel.uiState.showMoreContext)
+        }
+    }
 
     // MARK: - Helper Functions
 
@@ -510,7 +510,7 @@ struct TranscriptionCardV2: View {
         duration: 15.0
     )
 
-    TranscriptionCardV2(transcription: sampleTranscription, isExpanded: false)
+    TranscriptionCardV2(transcription: sampleTranscription)
         .modelContainer(container)
         .environmentObject(enhancementService)
         .padding()

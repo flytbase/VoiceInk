@@ -51,6 +51,11 @@ class OptimizedSearchService: ObservableObject {
                 searchableComponents.append(enhancement.enhancementMethod)
             }
 
+            // Audio context
+            if let context = transcription.audioContext, !context.isEmpty {
+                searchableComponents.append(context)
+            }
+
             // Date components for date-based searches
             let dateFormatter = DateFormatter()
             dateFormatter.dateStyle = .medium
@@ -199,6 +204,11 @@ class OptimizedSearchService: ObservableObject {
         for enhancement in transcription.enhancementVersions {
             searchableComponents.append(enhancement.enhancedText)
             searchableComponents.append(enhancement.enhancementMethod)
+        }
+
+        // Audio context
+        if let context = transcription.audioContext, !context.isEmpty {
+            searchableComponents.append(context)
         }
 
         let dateFormatter = DateFormatter()

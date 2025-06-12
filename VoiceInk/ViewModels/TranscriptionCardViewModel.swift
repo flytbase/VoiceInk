@@ -41,6 +41,7 @@ struct FeedbackState {
 struct UIState {
     var showMoreRawText = false
     var showMoreEnhancedText = false
+    var showMoreContext = false
 }
 
 // MARK: - TranscriptionCardViewModel
@@ -172,6 +173,14 @@ class TranscriptionCardViewModel: ObservableObject {
             ? String(preview.prefix(Constants.previewTextLimit)) + "..." : preview
     }
 
+    var contextPreview: String? {
+        guard let context = transcription.audioContext, !context.isEmpty else {
+            return nil
+        }
+        let preview = String(context.prefix(80))
+        return context.count > 80 ? preview + "..." : preview
+    }
+
     // MARK: - Helper Methods
 
     func enhancementsForVersion(_ versionId: UUID) -> [EnhancementVersion] {
@@ -202,6 +211,10 @@ class TranscriptionCardViewModel: ObservableObject {
 
     func toggleEnhancedTextExpansion() {
         uiState.showMoreEnhancedText.toggle()
+    }
+
+    func toggleContextExpansion() {
+        uiState.showMoreContext.toggle()
     }
 
     func showDeleteAlert() {
@@ -319,14 +332,15 @@ class TranscriptionCardViewModel: ObservableObject {
                     ]
                 )
                 
-                // Use streaming re-transcription with transcription ID for tracking
+                // Use streaming re-transcription with transcription ID for tracking and reuse context
                 await AudioTranscriptionManager.shared.transcribeWithStreaming(
                     audioURL: audioURL,
                     modelContext: modelContext,
                     whisperState: whisperState,
                     isRetranscription: true,
                     originalTranscription: transcription,
-                    transcriptionId: transcription.id
+                    transcriptionId: transcription.id,
+                    audioContext: transcription.audioContext
                 )
             } else {
                 loggingService.info(

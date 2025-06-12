@@ -105,7 +105,8 @@ class AudioTranscriptionManager: ObservableObject {
                     await transcribeWithStreaming(
                         audioURL: url,
                         modelContext: modelContext,
-                        whisperState: whisperState
+                        whisperState: whisperState,
+                        audioContext: audioContext
                     )
                     return
                 }
@@ -245,7 +246,8 @@ class AudioTranscriptionManager: ObservableObject {
                             text: text,
                             duration: duration,
                             enhancedText: enhancedText,
-                            audioFileURL: permanentURL.absoluteString
+                            audioFileURL: permanentURL.absoluteString,
+                            audioContext: audioContext
                         )
                         modelContext.insert(transcription)
                         try modelContext.save()
@@ -277,7 +279,8 @@ class AudioTranscriptionManager: ObservableObject {
                         let transcription = Transcription(
                             text: text,
                             duration: duration,
-                            audioFileURL: permanentURL.absoluteString
+                            audioFileURL: permanentURL.absoluteString,
+                            audioContext: audioContext
                         )
                         modelContext.insert(transcription)
                         try modelContext.save()
@@ -287,7 +290,8 @@ class AudioTranscriptionManager: ObservableObject {
                     let transcription = Transcription(
                         text: text,
                         duration: duration,
-                        audioFileURL: permanentURL.absoluteString
+                        audioFileURL: permanentURL.absoluteString,
+                        audioContext: audioContext
                     )
                     modelContext.insert(transcription)
                     try modelContext.save()
@@ -583,7 +587,8 @@ class AudioTranscriptionManager: ObservableObject {
                         text: "",  // Empty - text goes in versions
                         duration: duration,
                         enhancedText: nil,  // Empty - enhanced text goes in enhancement versions
-                        audioFileURL: permanentURL.absoluteString
+                        audioFileURL: permanentURL.absoluteString,
+                        audioContext: audioContext
                     )
 
                     // Create main transcription version

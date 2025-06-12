@@ -9,19 +9,21 @@ final class Transcription {
     var timestamp: Date
     var duration: TimeInterval
     var audioFileURL: String?
+    var audioContext: String?
     
     // Version Management Properties
     var transcriptionVersions: [TranscriptionVersion] = []
     var enhancementVersions: [EnhancementVersion] = []
     var mainVersionId: UUID?
     
-    init(text: String, duration: TimeInterval, enhancedText: String? = nil, audioFileURL: String? = nil) {
+    init(text: String, duration: TimeInterval, enhancedText: String? = nil, audioFileURL: String? = nil, audioContext: String? = nil) {
         self.id = UUID()
         self.text = text
         self.enhancedText = enhancedText
         self.timestamp = Date()
         self.duration = duration
         self.audioFileURL = audioFileURL
+        self.audioContext = audioContext
     }
     
     // MARK: - Computed Properties

@@ -147,6 +147,21 @@ struct TranscriptionCardPreview: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
 
+            // Audio context preview (if available)
+            if let context = transcription.audioContext, !context.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text("Context: \(String(context.prefix(80)))\(context.count > 80 ? "..." : "")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.top, 4)
+            }
+
             // Action buttons for collapsed state
             HStack(spacing: 12) {
                 ActionButton(
@@ -244,7 +259,6 @@ struct OptimizedTranscriptionCard: View {
                 if let pooledViewModel = viewModel {
                     TranscriptionCardV2(
                         transcription: transcription,
-                        isExpanded: true,
                         isSelected: isSelected,
                         viewModel: pooledViewModel
                     )
